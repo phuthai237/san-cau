@@ -6,7 +6,7 @@ import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell, Zap, Info } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell, Zap, Search } from 'lucide-react';
 
 const COURTS: CourtType[] = [
   { id: 1, name: 'Sân Số 1 (VIP)' },
@@ -48,6 +48,7 @@ const App: React.FC = () => {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState(false);
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [installState, setInstallState] = useState<'none' | 'ready' | 'installing' | 'installed'>('none');
   const [platform, setPlatform] = useState<'ios' | 'android' | 'other'>('other');
   const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
 
@@ -58,22 +59,22 @@ const App: React.FC = () => {
     if (/iphone|ipad|ipod/.test(ua)) setPlatform('ios');
     else if (/android/.test(ua)) setPlatform('android');
 
-    // Kiểm tra xem app đã chạy ở chế độ Standalone (đã cài đặt) chưa
     if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
       setIsStandalone(true);
+      setInstallState('installed');
     }
 
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
-      console.log('PWA Ready');
+      setInstallState('ready');
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', () => {
       setIsStandalone(true);
+      setInstallState('installed');
       setDeferredPrompt(null);
-      alert("🎉 Cài đặt thành công! Bây giờ bạn có thể mở app từ màn hình chính.");
     });
 
     if ("Notification" in window) {
@@ -83,9 +84,7 @@ const App: React.FC = () => {
       }
     }
 
-    return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    };
+    return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   const handleInstallClick = async () => {
@@ -95,13 +94,17 @@ const App: React.FC = () => {
     }
     
     if (deferredPrompt) { 
+      setInstallState('installing');
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
       if (outcome === 'accepted') { 
-        setDeferredPrompt(null); 
+        setDeferredPrompt(null);
+        // Không set installed ngay vì appinstalled event sẽ lo việc đó
+      } else {
+        setInstallState('ready');
       }
     } else {
-      alert("💡 HƯỚNG DẪN CÀI ĐẶT:\n\n1. Nhấn vào nút 3 chấm (Menu) ở góc trên bên phải Chrome.\n2. Chọn dòng 'Cài đặt ứng dụng' (Install app) hoặc 'Thêm vào màn hình chính'.\n3. Sau đó app sẽ xuất hiện trên màn hình điện thoại như một ứng dụng thông thường.");
+      alert("💡 MẸO CÀI ĐẶT NHANH:\n\n1. Nhấn vào nút 3 chấm ở góc Chrome.\n2. Chọn 'Thêm vào màn hình chính' hoặc 'Cài đặt ứng dụng'.\n3. Sau khi cài xong, hãy tìm icon trong 'Danh sách tất cả ứng dụng' của điện thoại.");
     }
   };
 
@@ -423,35 +426,49 @@ const App: React.FC = () => {
 
         {activeTab === 'stats' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            {/* PWA Install Status for Android */}
+            {/* Improved PWA Install UI */}
             {!isStandalone && (
-              <div className="bg-emerald-600 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-8 group">
-                <div className="absolute right-[-5%] top-[-10%] opacity-10"><Zap className="w-40 h-40 group-hover:scale-110 transition-transform duration-500" /></div>
-                <div className="flex-1 text-center md:text-left">
-                  <div className="flex items-center gap-2 justify-center md:justify-start mb-2">
-                    <span className="px-3 py-1 bg-white/20 rounded-full text-[10px] font-black uppercase tracking-widest">PWA Mode</span>
-                    {deferredPrompt ? (
-                      <span className="px-3 py-1 bg-emerald-400 text-emerald-950 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse">Sẵn sàng cài đặt</span>
-                    ) : (
-                      <span className="px-3 py-1 bg-white/10 rounded-full text-[10px] font-black uppercase tracking-widest">Hỗ trợ Android</span>
-                    )}
+              <div className="bg-emerald-600 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden flex flex-col items-center text-center gap-6">
+                <div className="absolute right-[-5%] top-[-10%] opacity-10"><Zap className="w-40 h-40" /></div>
+                
+                {installState === 'installed' ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="bg-white p-4 rounded-full text-emerald-600 shadow-xl"><CheckCircle className="w-10 h-10" /></div>
+                    <h3 className="text-2xl font-black uppercase">ĐÃ CÀI ĐẶT XONG!</h3>
+                    <p className="text-emerald-100/80 font-bold text-xs max-w-xs">Nếu bạn không thấy icon ở màn hình chính, hãy tìm trong <b>Danh sách ứng dụng</b> hoặc thư mục <b>Chrome Apps</b>.</p>
                   </div>
-                  <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">CÀI ĐẶT ỨNG DỤNG</h3>
-                  <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">Cài đặt để sử dụng như app thật trên màn hình chính, không cần trình duyệt.</p>
-                </div>
-                <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-emerald-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
-                  <Download className="w-6 h-6" /> CÀI ĐẶT NGAY
-                </button>
-              </div>
-            )}
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                       <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight">TẢI APP VỀ MÁY</h3>
+                       <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 max-w-md mx-auto leading-relaxed">Sử dụng như ứng dụng thực thụ, nhanh hơn, mượt hơn và không cần mở trình duyệt.</p>
+                    </div>
 
-            {isStandalone && (
-              <div className="bg-white p-6 rounded-[2rem] border-4 border-emerald-500/20 flex items-center gap-4">
-                 <div className="bg-emerald-500 p-3 rounded-xl text-white"><ShieldCheck className="w-6 h-6" /></div>
-                 <div>
-                   <div className="font-black text-emerald-900 text-sm uppercase">Đã cài đặt thành công</div>
-                   <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Bạn đang sử dụng phiên bản App Native</div>
-                 </div>
+                    <div className="flex flex-col md:flex-row gap-4 w-full">
+                      <button 
+                        onClick={handleInstallClick} 
+                        disabled={installState === 'installing'}
+                        className={cn(
+                          "flex-1 px-10 py-5 bg-white text-emerald-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all",
+                          installState === 'installing' && "opacity-50"
+                        )}
+                      >
+                        {installState === 'installing' ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Download className="w-6 h-6" />}
+                        {installState === 'installing' ? 'ĐANG CÀI ĐẶT...' : 'CÀI ĐẶT NGAY'}
+                      </button>
+                    </div>
+
+                    <div className="bg-black/20 p-6 rounded-[2rem] border border-white/10 w-full text-left space-y-4">
+                       <div className="flex items-start gap-4">
+                          <div className="bg-white/20 p-2 rounded-lg"><Search className="w-5 h-5" /></div>
+                          <div>
+                            <p className="font-black text-xs uppercase tracking-tight">Kiểm tra sau khi cài:</p>
+                            <p className="text-[10px] text-white/60 font-medium">Vuốt lên để xem tất cả ứng dụng, tìm icon <b>Badminton Pro</b>. Một số máy sẽ gom vào thư mục Chrome.</p>
+                          </div>
+                       </div>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             

@@ -2,15 +2,14 @@
 {
   "name": "Badminton Pro Manager",
   "short_name": "Badminton Pro",
-  "description": "Quản lý sân cầu lông chuyên nghiệp và dịch vụ đi kèm.",
-  "id": "badminton-pro-manager-unique-id",
+  "description": "Quản lý sân cầu lông chuyên nghiệp",
+  "id": "/badminton-pro-v1",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
-  "orientation": "portrait",
   "background_color": "#064e3b",
   "theme_color": "#064e3b",
+  "orientation": "portrait",
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/3058/3058284.png",
