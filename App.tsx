@@ -2,9 +2,9 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { generateTimeSlots, formatDateKey, formatVND, cn } from './utils';
 import { Booking, Court as CourtType, TimeSlot, Product } from './types';
-import { Court } from './components/Court';
-import { BookingModal } from './components/BookingModal';
-import { BookingDetailModal } from './components/BookingDetailModal';
+import { Court } from './Court';
+import { BookingModal } from './BookingModal';
+import { BookingDetailModal } from './BookingDetailModal';
 import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, CloudOff, RefreshCw, Smartphone, Download, Apple, Info, ShieldCheck } from 'lucide-react';
 
 const COURTS: CourtType[] = [
@@ -48,16 +48,13 @@ const App: React.FC = () => {
   const isInitialMount = useRef(true);
 
   useEffect(() => {
-    // Kiểm tra nếu app đang chạy ở chế độ cài đặt (Standalone)
     if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
       setIsStandalone(true);
     }
-
     const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
     };
-
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
@@ -67,12 +64,10 @@ const App: React.FC = () => {
       alert("Ứng dụng đã được cài đặt!");
       return;
     }
-
     if (!deferredPrompt) {
       alert("HƯỚNG DẪN CÀI ĐẶT:\n\n1. iPhone (Safari): Nhấn 'Chia sẻ' -> 'Thêm vào màn hình chính'.\n\n2. Android (Chrome): Nhấn '3 chấm' -> 'Cài đặt ứng dụng'.");
       return;
     }
-    
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
@@ -92,20 +87,11 @@ const App: React.FC = () => {
     if (!syncId) return;
     setSyncStatus('syncing');
     try {
-      const data = {
-        bookings: currentBookings,
-        products: currentProducts,
-        timestamp: Date.now()
-      };
-      await fetch(`${SYNC_API_BASE}${syncId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data)
-      });
+      const data = { bookings: currentBookings, products: currentProducts, timestamp: Date.now() };
+      await fetch(`${SYNC_API_BASE}${syncId}`, { method: 'PUT', body: JSON.stringify(data) });
       setSyncStatus('success');
       setLastSynced(Date.now());
-    } catch (e) {
-      setSyncStatus('error');
-    }
+    } catch (e) { setSyncStatus('error'); }
   }, [syncId]);
 
   const pullFromCloud = useCallback(async () => {
@@ -122,26 +108,19 @@ const App: React.FC = () => {
         }
         setSyncStatus('success');
       }
-    } catch (e) {
-      setSyncStatus('error');
-    }
+    } catch (e) { setSyncStatus('error'); }
   }, [syncId, lastSynced]);
 
   useEffect(() => {
     localStorage.setItem('badminton-bookings', JSON.stringify(bookings));
     localStorage.setItem('badminton-products', JSON.stringify(products));
     localStorage.setItem('badminton-sync-id', syncId);
-
     if (isInitialMount.current) {
       isInitialMount.current = false;
       if (syncId) pullFromCloud();
       return;
     }
-
-    const timer = setTimeout(() => {
-        pushToCloud(bookings, products);
-    }, 1500);
-
+    const timer = setTimeout(() => { pushToCloud(bookings, products); }, 1500);
     return () => clearTimeout(timer);
   }, [bookings, products, syncId, pullFromCloud, pushToCloud]);
 
@@ -176,14 +155,11 @@ const App: React.FC = () => {
       const nowTotal = now.getHours() * 60 + now.getMinutes();
       return nowTotal >= slotTotal && nowTotal < slotTotal + 30;
     }) || TIME_SLOTS[0];
-
     if (isSlotBooked(courtId, currentSlot.time)) {
       alert(`Sân ${courtId} đang bận!`);
       return;
     }
-
     const name = prompt("Tên khách:") || "Khách Vãng Lai";
-    
     const newBooking: Booking = {
       id: 'live-' + Date.now(),
       courtId: courtId,
@@ -200,7 +176,6 @@ const App: React.FC = () => {
       status: 'active',
       durationSlots: 1
     };
-
     setBookings(prev => [...prev, newBooking]);
     setShowQuickPlayMenu(false);
   }, [dateKey, isSlotBooked]);
@@ -211,7 +186,6 @@ const App: React.FC = () => {
     const slotsToBook = TIME_SLOTS.slice(startIndex, startIndex + data.durationSlots);
     const newBookings: Booking[] = [];
     const groupId = Math.random().toString(36).substr(2, 9);
-
     data.selectedCourtIds.forEach((courtId: number) => {
       slotsToBook.forEach(slot => {
         newBookings.push({
@@ -231,7 +205,6 @@ const App: React.FC = () => {
         });
       });
     });
-
     setBookings((prev) => [...prev, ...newBookings]);
     setIsBookingModalOpen(false);
   }, [pendingBooking, dateKey]);
@@ -251,7 +224,6 @@ const App: React.FC = () => {
       if (booking.courtId === 0) {
         return prev.map(b => b.id === booking.id ? { ...booking, status: 'paid', remainingAmount: 0 } : b);
       }
-
       if (booking.isLive && booking.actualStartTime) {
         const start = new Date(booking.actualStartTime);
         const end = new Date();
@@ -260,41 +232,28 @@ const App: React.FC = () => {
         const slotsUsed = Math.max(1, Math.ceil(hours * 2));
         const courtTotal = slotsUsed * (PRICE_PER_HOUR / 2);
         const serviceTotal = (booking.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        
         return prev.map(b => b.id === booking.id ? { 
-          ...booking, 
-          status: 'paid', 
-          totalAmount: courtTotal + serviceTotal, 
-          remainingAmount: 0,
-          durationSlots: slotsUsed 
+          ...booking, status: 'paid', totalAmount: courtTotal + serviceTotal, 
+          remainingAmount: 0, durationSlots: slotsUsed 
         } : b);
       }
-
       const gId = booking.groupId || booking.id;
       const otherOnes = prev.filter(b => (b.groupId || b.id) !== gId);
       const groupOnes = prev.filter(b => (b.groupId || b.id) === gId);
-      
       const results: Booking[] = [];
       const courtIds = Array.from(new Set(groupOnes.map(b => b.courtId)));
-
       courtIds.forEach(cId => {
         const courtSlots = groupOnes.filter(b => b.courtId === cId).sort((a,b) => a.timeSlot.localeCompare(b.timeSlot));
         const finalSlots = courtSlots.slice(0, Math.max(1, finalDurationSlots));
         finalSlots.forEach((s, idx) => {
           results.push({
-            ...s,
-            status: 'paid',
-            totalAmount: idx === 0 ? booking.totalAmount / courtIds.length : 0, 
-            remainingAmount: 0,
-            serviceItems: idx === 0 ? booking.serviceItems : [],
-            durationSlots: finalDurationSlots
+            ...s, status: 'paid', totalAmount: idx === 0 ? booking.totalAmount / courtIds.length : 0, 
+            remainingAmount: 0, serviceItems: idx === 0 ? booking.serviceItems : [], durationSlots: finalDurationSlots
           });
         });
       });
-
       return [...otherOnes, ...results];
     });
-
     setIsDetailModalOpen(false);
     setSelectedBookingForDetail(null);
   }, []);
@@ -304,19 +263,8 @@ const App: React.FC = () => {
     const now = new Date();
     const currentTime = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     const virtualBooking: Booking = {
-      id: 'shop-' + Date.now(),
-      date: dateKey,
-      customerName: name,
-      phoneNumber: "Bán lẻ",
-      courtId: 0,
-      timeSlot: currentTime,
-      totalAmount: 0,
-      deposit: 0,
-      remainingAmount: 0,
-      serviceItems: [],
-      status: 'active',
-      durationSlots: 0,
-      groupId: 'shop-group-' + Date.now()
+      id: 'shop-' + Date.now(), date: dateKey, customerName: name, phoneNumber: "Bán lẻ", courtId: 0, timeSlot: currentTime,
+      totalAmount: 0, deposit: 0, remainingAmount: 0, serviceItems: [], status: 'active', durationSlots: 0, groupId: 'shop-group-' + Date.now()
     };
     setSelectedBookingForDetail(virtualBooking);
     setIsDetailModalOpen(true);
@@ -325,23 +273,16 @@ const App: React.FC = () => {
 
   const stats = useMemo(() => {
     const processedGroups = new Set<string>();
-    let totalRevenue = 0;
-    let totalDeposit = 0;
-    let totalServices = 0;
-
+    let totalRevenue = 0; let totalDeposit = 0; let totalServices = 0;
     bookings.forEach(b => {
       if (b.status === 'paid') {
          totalRevenue += b.totalAmount;
          totalServices += (b.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
       } else {
          const gId = b.groupId || b.id;
-         if (!processedGroups.has(gId)) {
-            totalDeposit += b.deposit;
-            processedGroups.add(gId);
-         }
+         if (!processedGroups.has(gId)) { totalDeposit += b.deposit; processedGroups.add(gId); }
       }
     });
-
     return { totalRevenue, totalDeposit, totalServices };
   }, [bookings]);
 
@@ -362,10 +303,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex gap-2">
-            <button 
-              onClick={() => setShowQuickPlayMenu(true)} 
-              className="px-5 py-3 bg-emerald-600 text-white rounded-2xl flex items-center gap-2 font-black text-xs md:text-sm shadow-xl shadow-emerald-200 active:scale-95 transition-all"
-            >
+            <button onClick={() => setShowQuickPlayMenu(true)} className="px-5 py-3 bg-emerald-600 text-white rounded-2xl flex items-center gap-2 font-black text-xs md:text-sm shadow-xl shadow-emerald-200 active:scale-95 transition-all">
               <Play className="w-3.5 h-3.5 fill-white" /> CHƠI NGAY
             </button>
             <button onClick={() => { if(window.confirm("Xóa sạch dữ liệu hệ thống?")) { setBookings([]); localStorage.clear(); window.location.reload(); } }} className="p-3 bg-rose-50 text-rose-500 rounded-2xl active:scale-95">
@@ -386,15 +324,12 @@ const App: React.FC = () => {
               </div>
               <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d); }} className="p-4 hover:bg-emerald-50 rounded-2xl text-gray-400 active:scale-90"><ChevronRight className="w-8 h-8" /></button>
             </div>
-
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12">
               {COURTS.map(court => (
                 <Court
-                  key={court.id}
-                  court={court}
+                  key={court.id} court={court}
                   bookings={bookings.filter(b => b.courtId === court.id && b.date === dateKey && b.status === 'active')}
-                  timeSlots={TIME_SLOTS}
-                  onSlotClick={handleSlotClick}
+                  timeSlots={TIME_SLOTS} onSlotClick={handleSlotClick}
                   onViewDetail={(b) => { setSelectedBookingForDetail(b); setIsDetailModalOpen(true); }}
                 />
               ))}
@@ -410,8 +345,7 @@ const App: React.FC = () => {
                 <p className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-1">Quản lý sản phẩm</p>
               </div>
               <button onClick={() => {
-                const name = prompt("Tên sản phẩm:");
-                const price = parseInt(prompt("Giá tiền:") || "0");
+                const name = prompt("Tên sản phẩm:"); const price = parseInt(prompt("Giá tiền:") || "0");
                 if (name && price) setProducts([...products, { id: Date.now().toString(), name, price }]);
               }} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all"><Plus className="w-5 h-5 stroke-[4px]" /> THÊM</button>
             </div>
@@ -434,38 +368,20 @@ const App: React.FC = () => {
 
         {activeTab === 'stats' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            <div className={cn(
-              "p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden transition-all duration-500",
-              isStandalone ? "bg-emerald-600" : "bg-blue-600"
-            )}>
-               <div className="absolute right-[-5%] top-[-10%] opacity-10">
-                 {isStandalone ? <ShieldCheck className="w-40 h-40" /> : <Download className="w-40 h-40" />}
-               </div>
+            <div className={cn("p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden transition-all duration-500", isStandalone ? "bg-emerald-600" : "bg-blue-600")}>
+               <div className="absolute right-[-5%] top-[-10%] opacity-10"><ShieldCheck className="w-40 h-40" /></div>
                <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
                   <div className="flex-1 text-center md:text-left">
-                    <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">
-                      {isStandalone ? "CHẾ ĐỘ NATIVE APP" : "CÀI ĐẶT ỨNG DỤNG MOBILE"}
-                    </h3>
-                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest leading-relaxed">
-                      {isStandalone 
-                        ? "Ứng dụng đang chạy mượt mà ở chế độ toàn màn hình như ứng dụng chuyên nghiệp." 
-                        : "Đưa ứng dụng ra màn hình chính để sử dụng toàn màn hình và mượt mà hơn như app thật."}
-                    </p>
+                    <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">{isStandalone ? "CHẾ ĐỘ NATIVE APP" : "CÀI ĐẶT ỨNG DỤNG MOBILE"}</h3>
+                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">{isStandalone ? "Ứng dụng đang chạy mượt mà ở chế độ toàn màn hình như ứng dụng chuyên nghiệp." : "Đưa ứng dụng ra màn hình chính để sử dụng toàn màn hình và mượt mà hơn như app thật."}</p>
                   </div>
                   {!isStandalone && (
                     <div className="flex flex-col gap-2 w-full md:w-auto">
-                      <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-blue-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
-                        <Download className="w-6 h-6" /> CÀI ĐẶT NGAY
-                      </button>
-                      <div className="flex justify-center md:justify-start gap-4 text-[10px] font-black uppercase tracking-widest text-white/50 px-4">
-                        <span className="flex items-center gap-1"><Smartphone className="w-3 h-3" /> Android</span>
-                        <span className="flex items-center gap-1"><Apple className="w-3 h-3" /> iPhone</span>
-                      </div>
+                      <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-blue-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"><Download className="w-6 h-6" /> CÀI ĐẶT NGAY</button>
                     </div>
                   )}
                </div>
             </div>
-
             <div className="bg-emerald-950 p-10 rounded-[3rem] text-white shadow-2xl grid grid-cols-2 md:grid-cols-4 gap-8 border-t-8 border-emerald-800">
               <div className="space-y-1">
                 <div className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em]">DOANH THU</div>
@@ -484,7 +400,6 @@ const App: React.FC = () => {
                 <div className="text-2xl md:text-4xl font-black tracking-tighter text-rose-400">{formatVND(stats.totalRevenue + stats.totalDeposit)}</div>
               </div>
             </div>
-
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-emerald-50 overflow-hidden">
                <div className="flex items-center justify-between mb-8">
                   <h3 className="text-2xl font-black text-gray-900 uppercase flex items-center gap-4 tracking-tighter"><Cloud className="w-8 h-8 text-emerald-600" /> ĐỒNG BỘ CLOUD</h3>
@@ -494,18 +409,11 @@ const App: React.FC = () => {
                   <div className="p-5 bg-emerald-50/50 rounded-2xl border-2 border-emerald-100 flex flex-col md:flex-row gap-4 items-center">
                     <div className="flex-1 w-full">
                       <label className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] ml-2">MÃ QUẢN LÝ CỬA HÀNG</label>
-                      <input 
-                        type="text" 
-                        value={syncId}
-                        onChange={(e) => setSyncId(e.target.value)}
-                        placeholder="Nhập mã cửa hàng..."
-                        className="w-full mt-2 px-5 py-3 bg-white border-2 border-transparent focus:border-emerald-500 outline-none rounded-xl font-black text-lg text-gray-900 shadow-sm"
-                      />
+                      <input type="text" value={syncId} onChange={(e) => setSyncId(e.target.value)} placeholder="Nhập mã cửa hàng..." className="w-full mt-2 px-5 py-3 bg-white border-2 border-transparent focus:border-emerald-500 outline-none rounded-xl font-black text-lg text-gray-900 shadow-sm" />
                     </div>
                   </div>
                </div>
             </div>
-
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden">
                <h3 className="text-xl font-black text-gray-900 uppercase mb-8 tracking-tighter flex items-center gap-3"><CreditCard className="w-7 h-7 text-emerald-600" /> GIAO DỊCH GẦN ĐÂY</h3>
                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
@@ -515,9 +423,7 @@ const App: React.FC = () => {
                         <div className="bg-white p-3 rounded-xl text-emerald-600 shadow-sm"><CheckCircle className="w-5 h-5" /></div>
                         <div>
                           <div className="font-black text-gray-900 uppercase text-sm tracking-tight">{b.customerName}</div>
-                          <div className="text-[9px] font-bold text-gray-400 uppercase">
-                            {b.courtId === 0 ? `Dịch vụ` : `Sân ${b.courtId}`} • {b.timeSlot}
-                          </div>
+                          <div className="text-[9px] font-bold text-gray-400 uppercase">{b.courtId === 0 ? `Dịch vụ` : `Sân ${b.courtId}`} • {b.timeSlot}</div>
                         </div>
                       </div>
                       <div className="text-right">
@@ -532,11 +438,7 @@ const App: React.FC = () => {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-100 z-50 px-6 pt-5 flex justify-around items-center rounded-t-[2.5rem] shadow-[0_-15px_40px_rgba(0,0,0,0.06)] safe-pb">
-        {[
-          { id: 'calendar', icon: CalendarIcon, label: 'Lịch' },
-          { id: 'shop', icon: ShoppingBag, label: 'Kho' },
-          { id: 'stats', icon: BarChart3, label: 'Admin' }
-        ].map(tab => (
+        {[ { id: 'calendar', icon: CalendarIcon, label: 'Lịch' }, { id: 'shop', icon: ShoppingBag, label: 'Kho' }, { id: 'stats', icon: BarChart3, label: 'Admin' } ].map(tab => (
           <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={cn("flex flex-col items-center gap-1.5 pb-4 px-6 transition-all duration-300", activeTab === tab.id ? "text-emerald-600 scale-110" : "text-gray-300")}>
             <tab.icon className={cn("w-7 h-7", activeTab === tab.id ? "stroke-[3px]" : "stroke-2")} />
             <span className="text-[9px] font-black uppercase tracking-widest">{tab.label}</span>
@@ -548,27 +450,17 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
           <div className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in duration-200">
             <div className="bg-emerald-900 p-7 text-white flex justify-between items-center">
-              <div>
-                <h3 className="text-xl font-black uppercase tracking-tight">VÀO SÂN</h3>
-                <p className="text-emerald-100/50 text-[9px] font-bold uppercase tracking-widest">Bắt đầu tính giờ</p>
-              </div>
+              <div><h3 className="text-xl font-black uppercase tracking-tight">VÀO SÂN</h3><p className="text-emerald-100/50 text-[9px] font-bold uppercase tracking-widest">Bắt đầu tính giờ</p></div>
               <button onClick={() => setShowQuickPlayMenu(false)} className="p-2 bg-white/10 rounded-xl"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-3 bg-gray-50">
               {COURTS.map(court => (
-                <button 
-                  key={court.id} 
-                  onClick={() => handlePlayNow(court.id)}
-                  className="w-full p-5 bg-white border border-gray-100 rounded-2xl flex items-center justify-between hover:border-emerald-500 active:scale-95 transition-all"
-                >
+                <button key={court.id} onClick={() => handlePlayNow(court.id)} className="w-full p-5 bg-white border border-gray-100 rounded-2xl flex items-center justify-between hover:border-emerald-500 active:scale-95 transition-all">
                   <div className="text-left font-black uppercase tracking-tight text-lg text-gray-900">{court.name}</div>
                   <div className="bg-emerald-50 p-2.5 rounded-xl text-emerald-600"><Play className="w-5 h-5 fill-current" /></div>
                 </button>
               ))}
-              <button 
-                onClick={handleOpenShopOnly}
-                className="w-full p-5 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between active:scale-95"
-              >
+              <button onClick={handleOpenShopOnly} className="w-full p-5 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between active:scale-95">
                 <div className="text-left font-black uppercase tracking-tight text-lg text-blue-900">BÁN LẺ DỊCH VỤ</div>
                 <div className="bg-blue-600 p-2.5 rounded-xl text-white"><ShoppingBag className="w-5 h-5" /></div>
               </button>
@@ -577,26 +469,8 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <BookingModal
-        isOpen={isBookingModalOpen}
-        onClose={() => setIsBookingModalOpen(false)}
-        onConfirm={handleBookingConfirm}
-        courts={COURTS}
-        initialCourtId={pendingBooking?.courtId || 0}
-        dateStr={selectedDate.toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' })}
-        timeSlot={pendingBooking?.slot || null}
-        allTimeSlots={TIME_SLOTS}
-        checkAvailability={checkAvailability}
-      />
-
-      <BookingDetailModal
-        isOpen={isDetailModalOpen}
-        onClose={() => setIsDetailModalOpen(false)}
-        booking={selectedBookingForDetail}
-        products={products}
-        onUpdateBooking={handleUpdateBooking}
-        onCheckout={handleCheckout}
-      />
+      <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} onConfirm={handleBookingConfirm} courts={COURTS} initialCourtId={pendingBooking?.courtId || 0} dateStr={selectedDate.toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' })} timeSlot={pendingBooking?.slot || null} allTimeSlots={TIME_SLOTS} checkAvailability={checkAvailability} />
+      <BookingDetailModal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} booking={selectedBookingForDetail} products={products} onUpdateBooking={handleUpdateBooking} onCheckout={handleCheckout} />
     </div>
   );
 };
