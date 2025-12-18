@@ -1,9 +1,10 @@
 
-const CACHE_NAME = 'badminton-pro-cache-v7';
+const CACHE_NAME = 'badminton-pro-cache-v8';
 const ASSETS = [
   './',
   './index.html',
   './manifest.json',
+  './index.tsx',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap'
 ];
@@ -30,15 +31,21 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+  
+  // Ưu tiên lấy từ mạng, nếu không được thì mới lấy từ cache để đảm bảo app luôn mới nhất
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      return cached || fetch(event.request).then((response) => {
+    fetch(event.request)
+      .then((response) => {
         if (response && response.status === 200) {
           const cacheCopy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheCopy));
         }
         return response;
-      }).catch(() => caches.match('./index.html'));
-    })
+      })
+      .catch(() => {
+        return caches.match(event.request).then((cached) => {
+          return cached || caches.match('./index.html');
+        });
+      })
   );
 });

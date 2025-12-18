@@ -16,7 +16,7 @@
     <!-- Icons -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
-    <link rel="manifest" href="manifest.json" />
+    <link rel="manifest" href="./manifest.json" />
     
     <title>Badminton Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -75,26 +75,18 @@
 </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
+    <!-- CỰC KỲ QUAN TRỌNG: Dùng đường dẫn tương đối ./ để tránh lỗi 404 trên App Android -->
+    <script type="module" src="./index.tsx"></script>
     <script>
-      // Sửa lỗi Origin Mismatch trong môi trường sandbox/preview
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          // Tạo URL tuyệt đối từ domain hiện tại để tránh việc browser nhầm lẫn với domain IDE (ai.studio)
-          const swUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/') + 'sw.js';
-          
-          navigator.serviceWorker.register(swUrl)
-            .then(reg => console.log('SW Registered with scope:', reg.scope))
-            .catch(err => {
-              // Nếu lỗi vẫn xảy ra do chính sách bảo mật của sandbox (cross-origin), ta bỏ qua để app vẫn chạy được các tính năng chính
-              if (err.message.includes('origin') || err.message.includes('SecurityError')) {
-                console.warn('PWA: Service Worker registration is restricted by the current preview environment. Offline mode may not be available.');
-              } else {
-                console.error('SW Registration Failed:', err);
-              }
-            });
+          // Sử dụng đường dẫn tương đối trực tiếp cho SW
+          navigator.serviceWorker.register('./sw.js')
+            .then(reg => console.log('SW Registered:', reg.scope))
+            .catch(err => console.warn('PWA: Service Worker registration failed:', err));
         });
       }
     </script>
-  </body>
+  <script type="module" src="/index.tsx"></script>
+</body>
 </html>
