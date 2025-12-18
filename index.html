@@ -5,7 +5,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     
-    <!-- PWA Primary Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Badminton Pro" />
@@ -13,10 +12,9 @@
     <meta name="theme-color" content="#064e3b" />
     <meta name="format-detection" content="telephone=no" />
     
-    <!-- Icons -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
-    <link rel="manifest" href="./manifest.json" />
+    <link rel="manifest" href="manifest.json" />
     
     <title>Badminton Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
@@ -53,13 +51,6 @@
       .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
       
       input { -webkit-appearance: none; border-radius: 0; }
-
-      @keyframes float {
-        0% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-        100% { transform: translateY(0px); }
-      }
-      .animate-float { animation: float 3s ease-in-out infinite; }
     </style>
     <script type="importmap">
     {
@@ -75,15 +66,13 @@
 </head>
   <body>
     <div id="root"></div>
-    <!-- CỰC KỲ QUAN TRỌNG: Dùng đường dẫn tương đối ./ để tránh lỗi 404 trên App Android -->
-    <script type="module" src="./index.tsx"></script>
+    <script type="module" src="index.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          // Sử dụng đường dẫn tương đối trực tiếp cho SW
-          navigator.serviceWorker.register('./sw.js')
-            .then(reg => console.log('SW Registered:', reg.scope))
-            .catch(err => console.warn('PWA: Service Worker registration failed:', err));
+          navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('SW Registered'))
+            .catch(err => console.log('SW Failed', err));
         });
       }
     </script>

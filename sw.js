@@ -1,12 +1,16 @@
 
-const CACHE_NAME = 'badminton-pro-cache-v8';
+const CACHE_NAME = 'badminton-pro-v10';
 const ASSETS = [
-  './',
-  './index.html',
-  './manifest.json',
-  './index.tsx',
-  'https://cdn.tailwindcss.com',
-  'https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap'
+  'index.html',
+  'manifest.json',
+  'index.tsx',
+  'App.tsx',
+  'types.ts',
+  'utils.ts',
+  'Court.tsx',
+  'BookingModal.tsx',
+  'BookingDetailModal.tsx',
+  'ProductModal.tsx'
 ];
 
 self.addEventListener('install', (event) => {
@@ -32,19 +36,25 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   
-  // Ưu tiên lấy từ mạng, nếu không được thì mới lấy từ cache để đảm bảo app luôn mới nhất
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        if (response && response.status === 200) {
+        // Nếu kết quả trả về là 404 (file không tồn tại trên server)
+        // và yêu cầu là trang (navigate), trả về index.html từ cache
+        if (response.status === 404 && event.request.mode === 'navigate') {
+          return caches.match('index.html');
+        }
+        
+        if (response.status === 200) {
           const cacheCopy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheCopy));
         }
         return response;
       })
       .catch(() => {
+        // Xử lý khi offline hoàn toàn
         return caches.match(event.request).then((cached) => {
-          return cached || caches.match('./index.html');
+          return cached || caches.match('index.html');
         });
       })
   );
