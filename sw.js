@@ -1,16 +1,17 @@
 
-const CACHE_NAME = 'badminton-pro-v10';
+const CACHE_NAME = 'badminton-pro-final-cache';
 const ASSETS = [
-  'index.html',
-  'manifest.json',
-  'index.tsx',
-  'App.tsx',
-  'types.ts',
-  'utils.ts',
-  'Court.tsx',
-  'BookingModal.tsx',
-  'BookingDetailModal.tsx',
-  'ProductModal.tsx'
+  '/',
+  '/index.html',
+  '/manifest.json',
+  '/index.tsx',
+  '/App.tsx',
+  '/types.ts',
+  '/utils.ts',
+  '/Court.tsx',
+  '/BookingModal.tsx',
+  '/BookingDetailModal.tsx',
+  '/ProductModal.tsx'
 ];
 
 self.addEventListener('install', (event) => {
@@ -35,27 +36,36 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  
+
+  // Xử lý yêu cầu điều hướng (mở trang)
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => {
+          // Nếu mất mạng hoặc lỗi server, trả về index.html từ cache
+          return caches.match('/') || caches.match('/index.html');
+        })
+    );
+    return;
+  }
+
+  // Xử lý các tài nguyên khác (ảnh, script, css)
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        // Nếu kết quả trả về là 404 (file không tồn tại trên server)
-        // và yêu cầu là trang (navigate), trả về index.html từ cache
-        if (response.status === 404 && event.request.mode === 'navigate') {
-          return caches.match('index.html');
-        }
-        
-        if (response.status === 200) {
-          const cacheCopy = response.clone();
+    caches.match(event.request).then((cachedResponse) => {
+      if (cachedResponse) return cachedResponse;
+      
+      return fetch(event.request).then((networkResponse) => {
+        if (networkResponse && networkResponse.status === 200) {
+          const cacheCopy = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheCopy));
         }
-        return response;
-      })
-      .catch(() => {
-        // Xử lý khi offline hoàn toàn
-        return caches.match(event.request).then((cached) => {
-          return cached || caches.match('index.html');
-        });
-      })
+        return networkResponse;
+      }).catch(() => {
+        // Fallback cho file không tìm thấy
+        if (event.request.url.endsWith('.tsx') || event.request.url.endsWith('.html')) {
+          return caches.match('/index.html');
+        }
+      });
+    })
   );
 });
