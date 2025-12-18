@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { generateTimeSlots, formatDateKey, formatVND, cn } from './utils';
+import { generateTimeSlots, formatDateKey, formatVND, cn, getStartOfWeek, getStartOfMonth, sendNotification } from './utils';
 import { Booking, Court as CourtType, TimeSlot, Product } from './types';
 import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, CloudOff, RefreshCw, Smartphone, Download, Apple, Info, ShieldCheck } from 'lucide-react';
+import { ProductModal } from './ProductModal';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell } from 'lucide-react';
 
 const COURTS: CourtType[] = [
   { id: 1, name: 'Sân Số 1 (VIP)' },
@@ -13,16 +14,15 @@ const COURTS: CourtType[] = [
 ];
 
 const DEFAULT_PRODUCTS: Product[] = [
-  { id: '1', name: 'Nước suối Aquafina', price: 10000 },
-  { id: '2', name: 'Revive Chanh Muối', price: 15000 },
-  { id: '3', name: 'Sting Dâu', price: 15000 },
-  { id: '4', name: 'Trà xanh không độ', price: 15000 },
-  { id: '5', name: 'Cầu Hải Yến (Quả)', price: 20000 },
+  { id: '1', name: 'Nước suối Aquafina', price: 10000, costPrice: 5000 },
+  { id: '2', name: 'Revive Chanh Muối', price: 15000, costPrice: 8000 },
+  { id: '3', name: 'Sting Dâu', price: 15000, costPrice: 8000 },
+  { id: '4', name: 'Trà xanh không độ', price: 15000, costPrice: 8000 },
+  { id: '5', name: 'Cầu Hải Yến (Quả)', price: 20000, costPrice: 15000 },
 ];
 
 const TIME_SLOTS = generateTimeSlots(6, 22);
 const PRICE_PER_HOUR = 60000;
-
 const SYNC_API_BASE = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/badminton_sync_';
 
 const App: React.FC = () => {
@@ -35,45 +35,51 @@ const App: React.FC = () => {
   
   const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
+  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [showQuickPlayMenu, setShowQuickPlayMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<'calendar' | 'shop' | 'stats'>('calendar');
   
+  const [statsPeriod, setStatsPeriod] = useState<'day' | 'week' | 'month'>('day');
+  const [statsAnchorDate, setStatsAnchorDate] = useState<Date>(new Date());
+
   const [pendingBooking, setPendingBooking] = useState<{courtId: number, slot: TimeSlot} | null>(null);
   const [selectedBookingForDetail, setSelectedBookingForDetail] = useState<Booking | null>(null);
 
-  // PWA States
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [platform, setPlatform] = useState<'ios' | 'android' | 'other'>('other');
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
 
   const isInitialMount = useRef(true);
 
   useEffect(() => {
+    const ua = window.navigator.userAgent.toLowerCase();
+    if (/iphone|ipad|ipod/.test(ua)) setPlatform('ios');
+    else if (/android/.test(ua)) setPlatform('android');
     if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
       setIsStandalone(true);
     }
-    const handler = (e: any) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-    };
+    const handler = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
     window.addEventListener('beforeinstallprompt', handler);
+
+    // Yêu cầu quyền thông báo ngay khi app load
+    if ("Notification" in window) {
+      setNotifPermission(Notification.permission);
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().then(setNotifPermission);
+      }
+    }
+
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const handleInstallClick = async () => {
-    if (isStandalone) {
-      alert("Ứng dụng đã được cài đặt!");
-      return;
-    }
-    if (!deferredPrompt) {
-      alert("HƯỚNG DẪN CÀI ĐẶT:\n\n1. iPhone (Safari): Nhấn 'Chia sẻ' -> 'Thêm vào màn hình chính'.\n\n2. Android (Chrome): Nhấn '3 chấm' -> 'Cài đặt ứng dụng'.");
-      return;
-    }
+    if (platform === 'ios') { setShowIOSGuide(true); return; }
+    if (!deferredPrompt) { alert("Để cài đặt:\n1. Android: Nhấn 3 chấm -> 'Cài đặt ứng dụng'.\n2. iPhone: Nhấn nút Chia sẻ -> 'Thêm vào MH chính'."); return; }
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') {
-      setDeferredPrompt(null);
-      setIsStandalone(true);
-    }
+    if (outcome === 'accepted') { setDeferredPrompt(null); setIsStandalone(true); }
   };
 
   useEffect(() => {
@@ -135,9 +141,7 @@ const App: React.FC = () => {
     if (startIndex === -1) return false;
     const neededSlots = TIME_SLOTS.slice(startIndex, startIndex + durationSlots).map(s => s.time);
     for (const courtId of courtIds) {
-      for (const time of neededSlots) {
-        if (isSlotBooked(courtId, time)) return false;
-      }
+      for (const time of neededSlots) { if (isSlotBooked(courtId, time)) return false; }
     }
     return true;
   }, [isSlotBooked]);
@@ -161,23 +165,14 @@ const App: React.FC = () => {
     }
     const name = prompt("Tên khách:") || "Khách Vãng Lai";
     const newBooking: Booking = {
-      id: 'live-' + Date.now(),
-      courtId: courtId,
-      date: dateKey,
-      timeSlot: currentSlot.time,
-      actualStartTime: now.toISOString(),
-      isLive: true,
-      customerName: name,
-      phoneNumber: "Trực tiếp",
-      totalAmount: 0,
-      deposit: 0,
-      remainingAmount: 0,
-      serviceItems: [],
-      status: 'active',
-      durationSlots: 1
+      id: 'live-' + Date.now(), courtId: courtId, date: dateKey, timeSlot: currentSlot.time,
+      actualStartTime: now.toISOString(), isLive: true, customerName: name, phoneNumber: "Trực tiếp",
+      totalAmount: 0, deposit: 0, remainingAmount: 0, serviceItems: [], status: 'active', durationSlots: 1
     };
     setBookings(prev => [...prev, newBooking]);
     setShowQuickPlayMenu(false);
+    
+    sendNotification("🏸 Vào sân trực tiếp", `Khách ${name} đã bắt đầu chơi tại Sân số ${courtId}`);
   }, [dateKey, isSlotBooked]);
 
   const handleBookingConfirm = useCallback((data: any) => {
@@ -189,24 +184,17 @@ const App: React.FC = () => {
     data.selectedCourtIds.forEach((courtId: number) => {
       slotsToBook.forEach(slot => {
         newBookings.push({
-          id: Math.random().toString(36).substr(2, 9),
-          courtId: courtId,
-          date: dateKey,
-          timeSlot: slot.time,
-          customerName: data.name,
-          phoneNumber: data.phone,
-          totalAmount: data.totalAmount,
-          deposit: data.deposit,
-          remainingAmount: data.totalAmount - data.deposit,
-          groupId: groupId,
-          serviceItems: [],
-          status: 'active',
+          id: Math.random().toString(36).substr(2, 9), courtId: courtId, date: dateKey, timeSlot: slot.time,
+          customerName: data.name, phoneNumber: data.phone, totalAmount: data.totalAmount, deposit: data.deposit,
+          remainingAmount: data.totalAmount - data.deposit, groupId: groupId, serviceItems: [], status: 'active',
           durationSlots: data.durationSlots
         });
       });
     });
     setBookings((prev) => [...prev, ...newBookings]);
     setIsBookingModalOpen(false);
+
+    sendNotification("✅ Đặt lịch thành công", `${data.name} đã đặt sân cho ${dateKey} lúc ${pendingBooking.slot.time}`);
   }, [pendingBooking, dateKey]);
 
   const handleUpdateBooking = useCallback((updated: Booking) => {
@@ -221,9 +209,7 @@ const App: React.FC = () => {
 
   const handleCheckout = useCallback((booking: Booking, finalDurationSlots: number) => {
     setBookings(prev => {
-      if (booking.courtId === 0) {
-        return prev.map(b => b.id === booking.id ? { ...booking, status: 'paid', remainingAmount: 0 } : b);
-      }
+      if (booking.courtId === 0) { return prev.map(b => b.id === booking.id ? { ...booking, status: 'paid', remainingAmount: 0 } : b); }
       if (booking.isLive && booking.actualStartTime) {
         const start = new Date(booking.actualStartTime);
         const end = new Date();
@@ -256,6 +242,8 @@ const App: React.FC = () => {
     });
     setIsDetailModalOpen(false);
     setSelectedBookingForDetail(null);
+
+    sendNotification("💰 Thanh toán hoàn tất", `Khách ${booking.customerName} đã thanh toán ${formatVND(booking.totalAmount)}`);
   }, []);
 
   const handleOpenShopOnly = useCallback(() => {
@@ -272,19 +260,69 @@ const App: React.FC = () => {
   }, [dateKey]);
 
   const stats = useMemo(() => {
-    const processedGroups = new Set<string>();
-    let totalRevenue = 0; let totalDeposit = 0; let totalServices = 0;
-    bookings.forEach(b => {
-      if (b.status === 'paid') {
-         totalRevenue += b.totalAmount;
-         totalServices += (b.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
-      } else {
-         const gId = b.groupId || b.id;
-         if (!processedGroups.has(gId)) { totalDeposit += b.deposit; processedGroups.add(gId); }
-      }
+    const start = new Date(statsAnchorDate);
+    let end = new Date(statsAnchorDate);
+    if (statsPeriod === 'day') { start.setHours(0,0,0,0); end.setHours(23,59,59,999); } 
+    else if (statsPeriod === 'week') {
+      const sw = getStartOfWeek(statsAnchorDate); start.setTime(sw.getTime()); start.setHours(0,0,0,0);
+      end.setTime(start.getTime() + 7 * 24 * 60 * 60 * 1000 - 1);
+    } 
+    else if (statsPeriod === 'month') {
+      const sm = getStartOfMonth(statsAnchorDate); start.setTime(sm.getTime()); start.setHours(0,0,0,0);
+      end = new Date(start.getFullYear(), start.getMonth() + 1, 0, 23, 59, 59, 999);
+    }
+    const filteredPaid = bookings.filter(b => {
+      const bDate = new Date(b.date);
+      return b.status === 'paid' && bDate >= start && bDate <= end;
     });
-    return { totalRevenue, totalDeposit, totalServices };
-  }, [bookings]);
+    const activeBookings = bookings.filter(b => b.status === 'active');
+    const processedGroups = new Set<string>();
+    let totalDeposit = 0;
+    activeBookings.forEach(b => {
+      const gId = b.groupId || b.id;
+      if (!processedGroups.has(gId)) { totalDeposit += b.deposit; processedGroups.add(gId); }
+    });
+
+    let totalRevenue = 0;
+    let totalServicesRevenue = 0;
+    let totalCourtRevenue = 0;
+    let totalCost = 0;
+
+    filteredPaid.forEach(b => {
+      totalRevenue += b.totalAmount;
+      const sRev = (b.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
+      const sCost = (b.serviceItems || []).reduce((sum, item) => sum + (item.costPrice * item.quantity), 0);
+      totalServicesRevenue += sRev;
+      totalCost += sCost;
+      totalCourtRevenue += (b.totalAmount - sRev);
+    });
+
+    const totalProfit = totalRevenue - totalCost;
+
+    return { totalRevenue, totalDeposit, totalServicesRevenue, totalCourtRevenue, totalCost, totalProfit, filteredPaid, start, end };
+  }, [bookings, statsPeriod, statsAnchorDate]);
+
+  const adjustStatsAnchor = (delta: number) => {
+    const d = new Date(statsAnchorDate);
+    if (statsPeriod === 'day') d.setDate(d.getDate() + delta);
+    else if (statsPeriod === 'week') d.setDate(d.getDate() + delta * 7);
+    else if (statsPeriod === 'month') d.setMonth(d.getMonth() + delta);
+    setStatsAnchorDate(d);
+  };
+
+  const statsTitle = useMemo(() => {
+    if (statsPeriod === 'day') return statsAnchorDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'long' });
+    if (statsPeriod === 'week') return `Tuần ${stats.start.toLocaleDateString('vi-VN')} - ${stats.end.toLocaleDateString('vi-VN')}`;
+    if (statsPeriod === 'month') return statsAnchorDate.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' });
+    return '';
+  }, [statsPeriod, statsAnchorDate, stats]);
+
+  const handleAddNewProductConfirm = (data: Omit<Product, 'id'>) => {
+    setProducts(prev => [...prev, { 
+      id: Date.now().toString(), 
+      ...data
+    }]);
+  };
 
   return (
     <div className="min-h-screen pb-40 bg-gray-50 flex flex-col font-inter safe-pb">
@@ -294,12 +332,15 @@ const App: React.FC = () => {
             <div className="bg-emerald-600 p-2.5 rounded-2xl text-white shadow-xl shadow-emerald-200"><Trophy className="w-6 h-6 md:w-8 md:h-8" /></div>
             <div>
               <h1 className="text-xl md:text-3xl font-black text-gray-900 uppercase tracking-tighter leading-none">Badminton Pro</h1>
-              {syncId && (
-                <div className="flex items-center gap-1 mt-1">
-                  <div className={cn("w-2 h-2 rounded-full", syncStatus === 'success' ? "bg-emerald-500" : syncStatus === 'error' ? "bg-rose-500" : "bg-amber-500 animate-pulse")}></div>
-                  <span className="text-[8px] font-black uppercase text-gray-400 tracking-widest">{syncStatus === 'success' ? 'Cloud Online' : syncStatus === 'error' ? 'Offline' : 'Syncing...'}</span>
-                </div>
-              )}
+              <div className="flex items-center gap-2 mt-1">
+                {syncId && (
+                  <>
+                    <div className={cn("w-2 h-2 rounded-full", syncStatus === 'success' ? "bg-emerald-500" : syncStatus === 'error' ? "bg-rose-500" : "bg-amber-500 animate-pulse")}></div>
+                    <span className="text-[8px] font-black uppercase text-gray-400 tracking-widest">{syncStatus === 'success' ? 'Cloud Online' : syncStatus === 'error' ? 'Offline' : 'Syncing...'}</span>
+                  </>
+                )}
+                {notifPermission === 'granted' && <Bell className="w-2.5 h-2.5 text-emerald-500" />}
+              </div>
             </div>
           </div>
           <div className="flex gap-2">
@@ -342,23 +383,25 @@ const App: React.FC = () => {
              <div className="flex justify-between items-center bg-white p-8 rounded-[2.5rem] shadow-lg border border-gray-100">
               <div>
                 <h2 className="text-3xl font-black text-gray-900 tracking-tight">KHO HÀNG</h2>
-                <p className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-1">Quản lý sản phẩm</p>
+                <p className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-1">Danh sách sản phẩm dịch vụ</p>
               </div>
-              <button onClick={() => {
-                const name = prompt("Tên sản phẩm:"); const price = parseInt(prompt("Giá tiền:") || "0");
-                if (name && price) setProducts([...products, { id: Date.now().toString(), name, price }]);
-              }} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all"><Plus className="w-5 h-5 stroke-[4px]" /> THÊM</button>
+              <button onClick={() => setIsProductModalOpen(true)} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all"><Plus className="w-5 h-5 stroke-[4px]" /> THÊM MỚI</button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               {products.map(p => (
-                <div key={p.id} className="bg-white p-5 rounded-[2rem] border-2 border-gray-50 shadow-sm flex flex-col justify-between group hover:border-emerald-500 transition-all">
+                <div key={p.id} className="bg-white p-6 rounded-[2rem] border-2 border-gray-50 shadow-sm flex flex-col justify-between group hover:border-emerald-500 transition-all">
                   <div className="mb-4">
-                    <div className="bg-gray-100 w-12 h-12 rounded-xl flex items-center justify-center text-gray-400 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors mb-4"><ShoppingBag className="w-6 h-6" /></div>
-                    <div className="text-lg font-black text-gray-900 leading-none tracking-tight uppercase truncate">{p.name}</div>
-                  </div>
-                  <div className="flex items-center justify-between pt-4 border-t border-gray-50">
-                    <div className="text-emerald-600 font-black text-sm">{formatVND(p.price)}</div>
-                    <button onClick={() => setProducts(products.filter(x => x.id !== p.id))} className="p-2 text-rose-400 hover:bg-rose-50 rounded-xl transition-colors"><Trash2 className="w-5 h-5" /></button>
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="bg-gray-100 w-12 h-12 rounded-xl flex items-center justify-center text-gray-400 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors"><ShoppingBag className="w-6 h-6" /></div>
+                      <button onClick={() => setProducts(products.filter(x => x.id !== p.id))} className="p-2 text-gray-300 hover:text-rose-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
+                    </div>
+                    <div className="text-xl font-black text-gray-900 leading-none tracking-tight uppercase mb-4">{p.name}</div>
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center px-4 py-3 bg-emerald-50 rounded-xl">
+                            <span className="text-[10px] font-black text-emerald-600 uppercase">Giá bán</span>
+                            <span className="font-black text-emerald-900 text-lg">{formatVND(p.price)}</span>
+                        </div>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -373,33 +416,103 @@ const App: React.FC = () => {
                <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
                   <div className="flex-1 text-center md:text-left">
                     <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">{isStandalone ? "CHẾ ĐỘ NATIVE APP" : "CÀI ĐẶT ỨNG DỤNG MOBILE"}</h3>
-                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">{isStandalone ? "Ứng dụng đang chạy mượt mà ở chế độ toàn màn hình như ứng dụng chuyên nghiệp." : "Đưa ứng dụng ra màn hình chính để sử dụng toàn màn hình và mượt mà hơn như app thật."}</p>
+                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">{isStandalone ? "Ứng dụng đang chạy mượt mà ở chế độ toàn màn hình." : "Đưa ứng dụng ra màn hình chính để sử dụng mượt mà hơn như app thật."}</p>
                   </div>
                   {!isStandalone && (
-                    <div className="flex flex-col gap-2 w-full md:w-auto">
-                      <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-blue-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"><Download className="w-6 h-6" /> CÀI ĐẶT NGAY</button>
-                    </div>
+                    <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-blue-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"><Download className="w-6 h-6" /> CÀI ĐẶT NGAY</button>
                   )}
                </div>
             </div>
-            <div className="bg-emerald-950 p-10 rounded-[3rem] text-white shadow-2xl grid grid-cols-2 md:grid-cols-4 gap-8 border-t-8 border-emerald-800">
-              <div className="space-y-1">
-                <div className="text-[10px] font-black text-emerald-400 uppercase tracking-[0.2em]">DOANH THU</div>
-                <div className="text-2xl md:text-4xl font-black tracking-tighter">{formatVND(stats.totalRevenue)}</div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">TIỀN CỌC</div>
-                <div className="text-2xl md:text-4xl font-black tracking-tighter">{formatVND(stats.totalDeposit)}</div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-[10px] font-black text-blue-400 uppercase tracking-[0.2em]">DỊCH VỤ</div>
-                <div className="text-2xl md:text-4xl font-black tracking-tighter">{formatVND(stats.totalServices)}</div>
-              </div>
-              <div className="space-y-1">
-                <div className="text-[10px] font-black text-rose-400 uppercase tracking-[0.2em]">TỔNG THU</div>
-                <div className="text-2xl md:text-4xl font-black tracking-tighter text-rose-400">{formatVND(stats.totalRevenue + stats.totalDeposit)}</div>
-              </div>
+            
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-gray-100 space-y-6">
+                <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div className="flex bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto">
+                        {(['day', 'week', 'month'] as const).map(p => (
+                            <button
+                                key={p}
+                                onClick={() => { setStatsPeriod(p); setStatsAnchorDate(new Date()); }}
+                                className={cn(
+                                    "flex-1 md:px-8 py-3 rounded-xl font-black text-xs uppercase transition-all",
+                                    statsPeriod === p ? "bg-white text-emerald-700 shadow-md" : "text-gray-400"
+                                )}
+                            >
+                                {p === 'day' ? 'Ngày' : p === 'week' ? 'Tuần' : 'Tháng'}
+                            </button>
+                        ))}
+                    </div>
+                    <div className="flex items-center gap-6 bg-emerald-50 px-6 py-3 rounded-2xl w-full md:w-auto justify-between">
+                        <button onClick={() => adjustStatsAnchor(-1)} className="p-2 text-emerald-600 hover:bg-white rounded-xl active:scale-90 transition-all"><ChevronLeft className="w-6 h-6" /></button>
+                        <span className="font-black text-emerald-900 uppercase tracking-tight text-sm whitespace-nowrap">{statsTitle}</span>
+                        <button onClick={() => adjustStatsAnchor(1)} className="p-2 text-emerald-600 hover:bg-white rounded-xl active:scale-90 transition-all"><ChevronRight className="w-6 h-6" /></button>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="bg-emerald-600 p-8 rounded-[2.5rem] text-white shadow-2xl shadow-emerald-200 space-y-2 relative overflow-hidden">
+                        <div className="absolute right-[-10%] bottom-[-10%] opacity-10"><PieChart className="w-32 h-32" /></div>
+                        <div className="text-[10px] font-black text-emerald-100 uppercase tracking-widest flex items-center gap-2">
+                            <TrendingUp className="w-4 h-4" /> LỢI NHUẬN THỰC (ĐÃ TRỪ VỐN)
+                        </div>
+                        <div className="text-3xl md:text-5xl font-black tracking-tighter text-white">{formatVND(stats.totalProfit)}</div>
+                        <p className="text-[10px] font-bold text-emerald-200 uppercase opacity-60">Lợi nhuận = Doanh thu - Giá vốn sản phẩm</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 md:col-span-2">
+                        <div className="bg-emerald-950 p-6 rounded-[2rem] text-white shadow-lg space-y-1">
+                            <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">TỔNG DOANH THU</div>
+                            <div className="text-xl md:text-3xl font-black tracking-tighter text-emerald-100">{formatVND(stats.totalRevenue)}</div>
+                        </div>
+                        <div className="bg-rose-50 p-6 rounded-[2rem] border border-rose-100 space-y-1">
+                            <div className="text-[9px] font-black text-rose-400 uppercase tracking-widest">TỔNG GIÁ VỐN</div>
+                            <div className="text-xl md:text-3xl font-black tracking-tighter text-rose-700">{formatVND(stats.totalCost)}</div>
+                        </div>
+                        <div className="bg-white border-2 border-emerald-50 p-6 rounded-[2rem] shadow-sm space-y-1">
+                            <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TIỀN SÂN</div>
+                            <div className="text-xl md:text-2xl font-black tracking-tighter text-emerald-900">{formatVND(stats.totalCourtRevenue)}</div>
+                        </div>
+                        <div className="bg-white border-2 border-emerald-50 p-6 rounded-[2rem] shadow-sm space-y-1">
+                            <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TIỀN DỊCH VỤ</div>
+                            <div className="text-xl md:text-2xl font-black tracking-tighter text-blue-800">{formatVND(stats.totalServicesRevenue)}</div>
+                        </div>
+                    </div>
+                </div>
             </div>
+
+            <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden">
+               <div className="flex items-center justify-between mb-8">
+                  <h3 className="text-xl font-black text-gray-900 uppercase tracking-tighter flex items-center gap-3"><CreditCard className="w-7 h-7 text-emerald-600" /> GIAO DỊCH {statsPeriod === 'day' ? 'TRONG NGÀY' : statsPeriod === 'week' ? 'TRONG TUẦN' : 'TRONG THÁNG'}</h3>
+                  <div className="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black text-gray-500 uppercase">{stats.filteredPaid.length} ĐƠN</div>
+               </div>
+               <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                 {stats.filteredPaid.length > 0 ? (
+                    stats.filteredPaid.slice().reverse().map(b => (
+                        <div key={b.id} className="p-5 bg-gray-50 rounded-2xl flex justify-between items-center border border-gray-100 hover:bg-white transition-all group">
+                          <div className="flex items-center gap-4">
+                            <div className="bg-white p-3 rounded-xl text-emerald-600 shadow-sm group-hover:bg-emerald-600 group-hover:text-white transition-colors"><CheckCircle className="w-5 h-5" /></div>
+                            <div>
+                              <div className="font-black text-gray-900 uppercase text-sm tracking-tight">{b.customerName}</div>
+                              <div className="text-[9px] font-bold text-gray-400 uppercase">
+                                {new Date(b.date).toLocaleDateString('vi-VN')} • {b.courtId === 0 ? `Dịch vụ` : `Sân ${b.courtId}`} • {b.timeSlot}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-lg font-black text-emerald-700 tracking-tighter">{formatVND(b.totalAmount)}</div>
+                            <div className="text-[8px] font-black text-gray-400 uppercase tracking-widest">
+                                LN: +{formatVND(b.totalAmount - (b.serviceItems || []).reduce((s, i) => s + (i.costPrice * i.quantity), 0))}
+                            </div>
+                          </div>
+                        </div>
+                    ))
+                 ) : (
+                    <div className="py-20 text-center flex flex-col items-center justify-center opacity-30 grayscale">
+                        <Filter className="w-12 h-12 mb-4" />
+                        <p className="font-black uppercase text-xs tracking-widest">Không có dữ liệu trong kỳ này</p>
+                    </div>
+                 )}
+               </div>
+            </div>
+
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-emerald-50 overflow-hidden">
                <div className="flex items-center justify-between mb-8">
                   <h3 className="text-2xl font-black text-gray-900 uppercase flex items-center gap-4 tracking-tighter"><Cloud className="w-8 h-8 text-emerald-600" /> ĐỒNG BỘ CLOUD</h3>
@@ -414,28 +527,30 @@ const App: React.FC = () => {
                   </div>
                </div>
             </div>
-            <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden">
-               <h3 className="text-xl font-black text-gray-900 uppercase mb-8 tracking-tighter flex items-center gap-3"><CreditCard className="w-7 h-7 text-emerald-600" /> GIAO DỊCH GẦN ĐÂY</h3>
-               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
-                 {bookings.filter(b => b.status === 'paid' && b.totalAmount > 0).slice(-20).reverse().map(b => (
-                    <div key={b.id} className="p-5 bg-gray-50 rounded-2xl flex justify-between items-center border border-gray-100">
-                      <div className="flex items-center gap-4">
-                        <div className="bg-white p-3 rounded-xl text-emerald-600 shadow-sm"><CheckCircle className="w-5 h-5" /></div>
-                        <div>
-                          <div className="font-black text-gray-900 uppercase text-sm tracking-tight">{b.customerName}</div>
-                          <div className="text-[9px] font-bold text-gray-400 uppercase">{b.courtId === 0 ? `Dịch vụ` : `Sân ${b.courtId}`} • {b.timeSlot}</div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-lg font-black text-emerald-700 tracking-tighter">{formatVND(b.totalAmount)}</div>
-                      </div>
-                    </div>
-                 ))}
-               </div>
-            </div>
           </div>
         )}
       </main>
+
+      {showIOSGuide && (
+        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex flex-col items-center justify-end p-10 text-white animate-in fade-in duration-300">
+           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6">
+             <div className="bg-white p-6 rounded-full text-blue-600 animate-float"><Apple className="w-16 h-16" /></div>
+             <h3 className="text-3xl font-black uppercase tracking-tight">CÀI ĐẶT TRÊN IPHONE</h3>
+             <div className="space-y-4 max-w-xs">
+                <div className="flex items-center gap-4 text-left bg-white/10 p-4 rounded-2xl">
+                   <div className="bg-blue-600 p-2 rounded-lg font-black">1</div>
+                   <p className="text-sm font-bold">Bấm vào biểu tượng <span className="inline-block bg-white/20 p-1 rounded"><Share className="w-4 h-4 inline" /> Chia sẻ</span> ở dưới trình duyệt.</p>
+                </div>
+                <div className="flex items-center gap-4 text-left bg-white/10 p-4 rounded-2xl">
+                   <div className="bg-blue-600 p-2 rounded-lg font-black">2</div>
+                   <p className="text-sm font-bold">Kéo xuống và chọn <span className="text-emerald-400 uppercase">Thêm vào MH chính</span></p>
+                </div>
+             </div>
+           </div>
+           <button onClick={() => setShowIOSGuide(false)} className="mb-12 px-10 py-4 bg-white text-black font-black rounded-2xl uppercase tracking-widest active:scale-95 transition-all">Đã hiểu</button>
+           <div className="animate-bounce mb-4 text-emerald-400"><MoveDown className="w-8 h-8" /></div>
+        </div>
+      )}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-100 z-50 px-6 pt-5 flex justify-around items-center rounded-t-[2.5rem] shadow-[0_-15px_40px_rgba(0,0,0,0.06)] safe-pb">
         {[ { id: 'calendar', icon: CalendarIcon, label: 'Lịch' }, { id: 'shop', icon: ShoppingBag, label: 'Kho' }, { id: 'stats', icon: BarChart3, label: 'Admin' } ].map(tab => (
@@ -471,6 +586,7 @@ const App: React.FC = () => {
 
       <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} onConfirm={handleBookingConfirm} courts={COURTS} initialCourtId={pendingBooking?.courtId || 0} dateStr={selectedDate.toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' })} timeSlot={pendingBooking?.slot || null} allTimeSlots={TIME_SLOTS} checkAvailability={checkAvailability} />
       <BookingDetailModal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} booking={selectedBookingForDetail} products={products} onUpdateBooking={handleUpdateBooking} onCheckout={handleCheckout} />
+      <ProductModal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} onConfirm={handleAddNewProductConfirm} />
     </div>
   );
 };

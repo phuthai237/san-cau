@@ -65,7 +65,13 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
     if (existingIndex > -1) {
       items[existingIndex].quantity += 1;
     } else {
-      items.push({ productId: product.id, productName: product.name, quantity: 1, price: product.price });
+      items.push({ 
+        productId: product.id, 
+        productName: product.name, 
+        quantity: 1, 
+        price: product.price,
+        costPrice: product.costPrice || 0 // Lưu giá vốn vào SaleItem
+      });
     }
     updateTotals(items, tempDurationSlots);
   };

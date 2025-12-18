@@ -3,6 +3,7 @@ export interface Product {
   id: string;
   name: string;
   price: number;
+  costPrice: number; // Giá vốn nhập kho
 }
 
 export interface SaleItem {
@@ -10,15 +11,16 @@ export interface SaleItem {
   productName: string;
   quantity: number;
   price: number;
+  costPrice: number; // Lưu giá vốn tại thời điểm bán để báo cáo chính xác
 }
 
 export interface Booking {
   id: string;
   courtId: number;
   date: string; // Format: YYYY-MM-DD
-  timeSlot: string; // Format: HH:mm (Thời gian dự kiến hoặc thời gian bắt đầu)
-  actualStartTime?: string; // ISO String cho "Chơi ngay"
-  isLive?: boolean; // Flag cho đơn chơi vãng lai tính theo giờ thực
+  timeSlot: string; // Format: HH:mm
+  actualStartTime?: string; 
+  isLive?: boolean; 
   customerName: string;
   phoneNumber: string;
   totalAmount: number;

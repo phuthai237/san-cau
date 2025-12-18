@@ -1,9 +1,8 @@
 
-const CACHE_NAME = 'badminton-pro-v1';
+const CACHE_NAME = 'badminton-pro-v3';
 const ASSETS = [
-  '/',
-  '/index.html',
-  '/index.tsx',
+  './',
+  './index.html',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap'
 ];
@@ -11,7 +10,8 @@ const ASSETS = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
+      // Sử dụng nỗ lực tốt nhất để cache
+      return Promise.allSettled(ASSETS.map(url => cache.add(url)));
     })
   );
   self.skipWaiting();
@@ -25,12 +25,19 @@ self.addEventListener('activate', (event) => {
       );
     })
   );
+  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
+  // Bỏ qua các request không phải GET
+  if (event.request.method !== 'GET') return;
+  
+  // Bỏ qua các request từ extension hoặc domain lạ
+  if (!event.request.url.startsWith(self.location.origin) && !event.request.url.startsWith('https://')) return;
+
   event.respondWith(
-    caches.match(event.request).then((response) => {
-      return response || fetch(event.request);
+    fetch(event.request).catch(() => {
+      return caches.match(event.request);
     })
   );
 });

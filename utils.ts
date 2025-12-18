@@ -1,3 +1,4 @@
+
 import { TimeSlot } from './types';
 
 export const generateTimeSlots = (startHour: number, endHour: number, intervalMinutes: number = 30): TimeSlot[] => {
@@ -35,12 +36,25 @@ export const formatVND = (amount: number) => {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 };
 
-export const getEndTime = (startTime: string, durationMinutes: number): string => {
-  const [hours, minutes] = startTime.split(':').map(Number);
-  const totalMinutes = hours * 60 + minutes + durationMinutes;
-  
-  const endH = Math.floor(totalMinutes / 60).toString().padStart(2, '0');
-  const endM = (totalMinutes % 60).toString().padStart(2, '0');
-  
-  return `${endH}:${endM}`;
+export const getStartOfWeek = (date: Date): Date => {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.setDate(diff));
+};
+
+export const getStartOfMonth = (date: Date): Date => {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+// Hàm gửi thông báo hệ thống
+export const sendNotification = (title: string, body: string) => {
+  if (!("Notification" in window)) return;
+
+  if (Notification.permission === "granted") {
+    new Notification(title, {
+      body,
+      icon: 'https://cdn-icons-png.flaticon.com/512/3058/3058284.png'
+    });
+  }
 };

@@ -15,6 +15,7 @@
     
     <!-- Icons -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
+    <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
     <link rel="manifest" href="manifest.json" />
     
     <title>Badminton Pro</title>
@@ -32,10 +33,9 @@
         overscroll-behavior-y: none;
         -webkit-tap-highlight-color: transparent;
         background-color: #f9fafb;
-        touch-action: manipulation; /* Ngăn chặn double-tap zoom, giúp click nhanh hơn */
+        touch-action: manipulation;
       }
 
-      /* Native feeling for iOS */
       @supports (padding: env(safe-area-inset-top)) {
         .safe-pt { padding-top: var(--safe-top); }
         .safe-pb { padding-bottom: var(--safe-bottom); }
@@ -48,23 +48,18 @@
         touch-action: manipulation;
       }
 
-      /* Tối ưu scroll */
-      .custom-scrollbar::-webkit-scrollbar {
-        width: 4px;
-      }
-      .custom-scrollbar::-webkit-scrollbar-track {
-        background: transparent;
-      }
-      .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #d1d5db;
-        border-radius: 10px;
-      }
+      .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
       
-      /* Loại bỏ hiệu ứng bóng đổ mặc định của input trên iOS */
-      input {
-        -webkit-appearance: none;
-        border-radius: 0;
+      input { -webkit-appearance: none; border-radius: 0; }
+
+      @keyframes float {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+        100% { transform: translateY(0px); }
       }
+      .animate-float { animation: float 3s ease-in-out infinite; }
     </style>
     <script type="importmap">
     {
@@ -82,11 +77,22 @@
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
     <script>
+      // Sửa lỗi Origin Mismatch trong môi trường sandbox/preview
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js')
-            .then(reg => console.log('SW Registered'))
-            .catch(err => console.log('SW Registration Failed', err));
+          // Tạo URL tuyệt đối từ domain hiện tại để tránh việc browser nhầm lẫn với domain IDE (ai.studio)
+          const swUrl = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '/') + 'sw.js';
+          
+          navigator.serviceWorker.register(swUrl)
+            .then(reg => console.log('SW Registered with scope:', reg.scope))
+            .catch(err => {
+              // Nếu lỗi vẫn xảy ra do chính sách bảo mật của sandbox (cross-origin), ta bỏ qua để app vẫn chạy được các tính năng chính
+              if (err.message.includes('origin') || err.message.includes('SecurityError')) {
+                console.warn('PWA: Service Worker registration is restricted by the current preview environment. Offline mode may not be available.');
+              } else {
+                console.error('SW Registration Failed:', err);
+              }
+            });
         });
       }
     </script>
