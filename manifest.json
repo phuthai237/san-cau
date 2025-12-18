@@ -1,0 +1,25 @@
+
+{
+  "name": "Badminton Booking Pro",
+  "short_name": "Badminton Pro",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f9fafb",
+  "theme_color": "#065f46",
+  "description": "Quản lý sân cầu lông chuyên nghiệp.",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3058/3058284.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/3058/3058284.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
