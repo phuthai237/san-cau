@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { generateTimeSlots, formatDateKey, formatVND, cn, getStartOfWeek, getStartOfMonth, sendNotification } from './utils';
-import { Booking, Court as CourtType, TimeSlot, Product } from './types';
+import { Booking, Court as CourtType, TimeSlot, Product, BankConfig } from './types';
 import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell, Zap, Search } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell, Zap, Search, ExternalLink, Link2, Copy, Key, Landmark, Activity } from 'lucide-react';
 
 const COURTS: CourtType[] = [
   { id: 1, name: 'Sân Số 1 (VIP)' },
@@ -21,15 +21,36 @@ const DEFAULT_PRODUCTS: Product[] = [
   { id: '5', name: 'Cầu Hải Yến (Quả)', price: 20000, costPrice: 15000 },
 ];
 
+const VIET_BANKS = [
+  { id: 'vcb', name: 'Vietcombank' },
+  { id: 'mbb', name: 'MB Bank' },
+  { id: 'tcb', name: 'Techcombank' },
+  { id: 'bidv', name: 'BIDV' },
+  { id: 'ctg', name: 'VietinBank' },
+  { id: 'acb', name: 'ACB' },
+  { id: 'tpb', name: 'TPBank' },
+  { id: 'vpb', name: 'VPBank' },
+  { id: 'agribank', name: 'Agribank' },
+];
+
 const TIME_SLOTS = generateTimeSlots(6, 22);
 const PRICE_PER_HOUR = 60000;
-const SYNC_API_BASE = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/badminton_sync_';
+const SYNC_API_BASE = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_v2_';
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [products, setProducts] = useState<Product[]>(DEFAULT_PRODUCTS);
+  const [bankConfig, setBankConfig] = useState<BankConfig>({ 
+    bankId: 'vcb', 
+    accountNo: '', 
+    accountName: '',
+    apiService: 'none',
+    apiKey: ''
+  });
+  
   const [syncId, setSyncId] = useState<string>(localStorage.getItem('badminton-sync-id') || '');
+  const [tempSyncId, setTempSyncId] = useState(syncId);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [lastSynced, setLastSynced] = useState<number>(0);
   
@@ -50,13 +71,13 @@ const App: React.FC = () => {
   const [showIOSGuide, setShowIOSGuide] = useState(false);
   const [installState, setInstallState] = useState<'none' | 'ready' | 'installing' | 'installed'>('none');
   const [platform, setPlatform] = useState<'ios' | 'android' | 'other'>('other');
-  const [notifPermission, setNotifPermission] = useState<NotificationPermission>('default');
 
   const isInitialMount = useRef(true);
 
   useEffect(() => {
     const ua = window.navigator.userAgent.toLowerCase();
-    if (/iphone|ipad|ipod/.test(ua)) setPlatform('ios');
+    const isIOS = /iphone|ipad|ipod/.test(ua);
+    if (isIOS) setPlatform('ios');
     else if (/android/.test(ua)) setPlatform('android');
 
     if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
@@ -71,55 +92,34 @@ const App: React.FC = () => {
     };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
-    window.addEventListener('appinstalled', () => {
-      setIsStandalone(true);
-      setInstallState('installed');
-      setDeferredPrompt(null);
-    });
-
-    if ("Notification" in window) {
-      setNotifPermission(Notification.permission);
-      if (Notification.permission === 'default') {
-        Notification.requestPermission().then(setNotifPermission);
-      }
-    }
-
     return () => window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
   }, []);
 
   const handleInstallClick = async () => {
-    if (platform === 'ios') { 
-      setShowIOSGuide(true); 
-      return; 
-    }
-    
+    if (platform === 'ios') { setShowIOSGuide(true); return; }
     if (deferredPrompt) { 
-      setInstallState('installing');
       deferredPrompt.prompt();
       const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') { 
-        setDeferredPrompt(null);
-        // Không set installed ngay vì appinstalled event sẽ lo việc đó
-      } else {
-        setInstallState('ready');
-      }
+      if (outcome === 'accepted') setDeferredPrompt(null);
     } else {
-      alert("💡 MẸO CÀI ĐẶT NHANH:\n\n1. Nhấn vào nút 3 chấm ở góc Chrome.\n2. Chọn 'Thêm vào màn hình chính' hoặc 'Cài đặt ứng dụng'.\n3. Sau khi cài xong, hãy tìm icon trong 'Danh sách tất cả ứng dụng' của điện thoại.");
+      alert("Nhấn vào dấu 3 chấm Chrome -> Cài đặt ứng dụng.");
     }
   };
 
   useEffect(() => {
     const savedBookings = localStorage.getItem('badminton-bookings');
     const savedProducts = localStorage.getItem('badminton-products');
+    const savedBank = localStorage.getItem('badminton-bank');
     if (savedBookings) setBookings(JSON.parse(savedBookings));
     if (savedProducts) setProducts(JSON.parse(savedProducts));
+    if (savedBank) setBankConfig(JSON.parse(savedBank));
   }, []);
 
-  const pushToCloud = useCallback(async (currentBookings: Booking[], currentProducts: Product[]) => {
+  const pushToCloud = useCallback(async (currentBookings: Booking[], currentProducts: Product[], currentBank: BankConfig) => {
     if (!syncId) return;
     setSyncStatus('syncing');
     try {
-      const data = { bookings: currentBookings, products: currentProducts, timestamp: Date.now() };
+      const data = { bookings: currentBookings, products: currentProducts, bankConfig: currentBank, timestamp: Date.now() };
       await fetch(`${SYNC_API_BASE}${syncId}`, { method: 'PUT', body: JSON.stringify(data) });
       setSyncStatus('success');
       setLastSynced(Date.now());
@@ -136,6 +136,7 @@ const App: React.FC = () => {
         if (cloudData.timestamp > lastSynced) {
           setBookings(cloudData.bookings);
           setProducts(cloudData.products);
+          if (cloudData.bankConfig) setBankConfig(cloudData.bankConfig);
           setLastSynced(cloudData.timestamp);
         }
         setSyncStatus('success');
@@ -146,15 +147,23 @@ const App: React.FC = () => {
   useEffect(() => {
     localStorage.setItem('badminton-bookings', JSON.stringify(bookings));
     localStorage.setItem('badminton-products', JSON.stringify(products));
+    localStorage.setItem('badminton-bank', JSON.stringify(bankConfig));
     localStorage.setItem('badminton-sync-id', syncId);
+    
     if (isInitialMount.current) {
       isInitialMount.current = false;
       if (syncId) pullFromCloud();
       return;
     }
-    const timer = setTimeout(() => { pushToCloud(bookings, products); }, 1500);
+    const timer = setTimeout(() => { pushToCloud(bookings, products, bankConfig); }, 1500);
     return () => clearTimeout(timer);
-  }, [bookings, products, syncId, pullFromCloud, pushToCloud]);
+  }, [bookings, products, bankConfig, syncId, pullFromCloud, pushToCloud]);
+
+  useEffect(() => {
+    if (!syncId) return;
+    const interval = setInterval(pullFromCloud, 10000);
+    return () => clearInterval(interval);
+  }, [syncId, pullFromCloud]);
 
   const dateKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
 
@@ -197,8 +206,6 @@ const App: React.FC = () => {
     };
     setBookings(prev => [...prev, newBooking]);
     setShowQuickPlayMenu(false);
-    
-    sendNotification("🏸 Vào sân trực tiếp", `Khách ${name} đã bắt đầu chơi tại Sân số ${courtId}`);
   }, [dateKey, isSlotBooked]);
 
   const handleBookingConfirm = useCallback((data: any) => {
@@ -219,8 +226,6 @@ const App: React.FC = () => {
     });
     setBookings((prev) => [...prev, ...newBookings]);
     setIsBookingModalOpen(false);
-
-    sendNotification("✅ Đặt lịch thành công", `${data.name} đã đặt sân lúc ${pendingBooking.slot.time}`);
   }, [pendingBooking, dateKey]);
 
   const handleUpdateBooking = useCallback((updated: Booking) => {
@@ -268,8 +273,6 @@ const App: React.FC = () => {
     });
     setIsDetailModalOpen(false);
     setSelectedBookingForDetail(null);
-
-    sendNotification("💰 Thanh toán hoàn tất", `Khách ${booking.customerName} đã thanh toán ${formatVND(booking.totalAmount)}`);
   }, []);
 
   const handleOpenShopOnly = useCallback(() => {
@@ -284,6 +287,12 @@ const App: React.FC = () => {
     setIsDetailModalOpen(true);
     setShowQuickPlayMenu(false);
   }, [dateKey]);
+
+  const handleAddNewProductConfirm = useCallback((newProduct: Omit<Product, 'id'>) => {
+    const product: Product = { ...newProduct, id: Math.random().toString(36).substr(2, 9) };
+    setProducts(prev => [...prev, product]);
+    setIsProductModalOpen(false);
+  }, []);
 
   const stats = useMemo(() => {
     const start = new Date(statsAnchorDate);
@@ -303,22 +312,15 @@ const App: React.FC = () => {
     });
 
     let totalRevenue = 0;
-    let totalServicesRevenue = 0;
-    let totalCourtRevenue = 0;
     let totalCost = 0;
 
     filteredPaid.forEach(b => {
       totalRevenue += b.totalAmount;
-      const sRev = (b.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
       const sCost = (b.serviceItems || []).reduce((sum, item) => sum + (item.costPrice * item.quantity), 0);
-      totalServicesRevenue += sRev;
       totalCost += sCost;
-      totalCourtRevenue += (b.totalAmount - sRev);
     });
 
-    const totalProfit = totalRevenue - totalCost;
-
-    return { totalRevenue, totalServicesRevenue, totalCourtRevenue, totalCost, totalProfit, filteredPaid, start, end };
+    return { totalRevenue, totalCost, totalProfit: totalRevenue - totalCost, filteredPaid };
   }, [bookings, statsPeriod, statsAnchorDate]);
 
   const adjustStatsAnchor = (delta: number) => {
@@ -329,12 +331,17 @@ const App: React.FC = () => {
     setStatsAnchorDate(d);
   };
 
-  const handleAddNewProductConfirm = (data: Omit<Product, 'id'>) => {
-    setProducts(prev => [...prev, { 
-      id: Date.now().toString(), 
-      ...data
-    }]);
+  const saveSyncId = () => {
+    if (!tempSyncId.trim()) {
+        if(window.confirm("Xác nhận ngắt kết nối đồng bộ?")) { setSyncId(''); setTempSyncId(''); }
+        return;
+    }
+    setSyncId(tempSyncId.trim());
+    alert("Đã kết nối mã: " + tempSyncId);
+    pullFromCloud();
   };
+
+  const generateNewSyncId = () => { setTempSyncId(Math.random().toString(36).substr(2, 12).toUpperCase()); };
 
   return (
     <div className="min-h-screen pb-40 bg-gray-50 flex flex-col font-inter safe-pb">
@@ -351,7 +358,6 @@ const App: React.FC = () => {
                     <span className="text-[8px] font-black uppercase text-gray-400 tracking-widest">{syncStatus === 'success' ? 'Online' : 'Syncing...'}</span>
                   </>
                 )}
-                {notifPermission === 'granted' && <Bell className="w-2.5 h-2.5 text-emerald-500" />}
               </div>
             </div>
           </div>
@@ -397,10 +403,7 @@ const App: React.FC = () => {
                 <h2 className="text-3xl font-black text-gray-900 tracking-tight uppercase">Kho hàng</h2>
                 <p className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-1">Sản phẩm & Dịch vụ</p>
               </div>
-              <button 
-                onClick={() => setIsProductModalOpen(true)} 
-                className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all"
-              >
+              <button onClick={() => setIsProductModalOpen(true)} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all">
                 <Plus className="w-5 h-5 stroke-[4px]" /> THÊM MỚI
               </button>
             </div>
@@ -425,53 +428,118 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'stats' && (
-          <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            {/* Improved PWA Install UI */}
-            {!isStandalone && (
-              <div className="bg-emerald-600 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden flex flex-col items-center text-center gap-6">
-                <div className="absolute right-[-5%] top-[-10%] opacity-10"><Zap className="w-40 h-40" /></div>
-                
-                {installState === 'installed' ? (
-                  <div className="flex flex-col items-center gap-3">
-                    <div className="bg-white p-4 rounded-full text-emerald-600 shadow-xl"><CheckCircle className="w-10 h-10" /></div>
-                    <h3 className="text-2xl font-black uppercase">ĐÃ CÀI ĐẶT XONG!</h3>
-                    <p className="text-emerald-100/80 font-bold text-xs max-w-xs">Nếu bạn không thấy icon ở màn hình chính, hãy tìm trong <b>Danh sách ứng dụng</b> hoặc thư mục <b>Chrome Apps</b>.</p>
-                  </div>
-                ) : (
-                  <>
+          <div className="space-y-8 animate-in slide-in-from-bottom duration-300 pb-20">
+            {/* Bank Configuration Section */}
+            <div className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-emerald-600/10 space-y-6">
+                <div className="flex items-center gap-4">
+                    <div className="bg-emerald-100 p-3 rounded-2xl text-emerald-600"><Landmark className="w-8 h-8" /></div>
+                    <div>
+                        <h3 className="text-2xl font-black text-gray-900 uppercase leading-none">Tài khoản thanh toán</h3>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Dùng để tạo mã QR chuyển khoản</p>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-2">
-                       <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight">TẢI APP VỀ MÁY</h3>
-                       <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 max-w-md mx-auto leading-relaxed">Sử dụng như ứng dụng thực thụ, nhanh hơn, mượt hơn và không cần mở trình duyệt.</p>
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-2">Ngân hàng</label>
+                        <select 
+                            value={bankConfig.bankId}
+                            onChange={(e) => setBankConfig({...bankConfig, bankId: e.target.value})}
+                            className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-gray-900 outline-none focus:border-emerald-500 transition-all"
+                        >
+                            {VIET_BANKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
                     </div>
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-2">Số tài khoản</label>
+                        <input 
+                            type="text"
+                            value={bankConfig.accountNo}
+                            onChange={(e) => setBankConfig({...bankConfig, accountNo: e.target.value})}
+                            className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-gray-900 outline-none focus:border-emerald-500 transition-all"
+                            placeholder="Nhập số tài khoản..."
+                        />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-2">Tên chủ tài khoản (KHÔNG DẤU)</label>
+                        <input 
+                            type="text"
+                            value={bankConfig.accountName}
+                            onChange={(e) => setBankConfig({...bankConfig, accountName: e.target.value.toUpperCase()})}
+                            className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-gray-900 outline-none focus:border-emerald-500 transition-all"
+                            placeholder="NGUYEN VAN A..."
+                        />
+                    </div>
+                </div>
 
-                    <div className="flex flex-col md:flex-row gap-4 w-full">
-                      <button 
-                        onClick={handleInstallClick} 
-                        disabled={installState === 'installing'}
-                        className={cn(
-                          "flex-1 px-10 py-5 bg-white text-emerald-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all",
-                          installState === 'installing' && "opacity-50"
-                        )}
-                      >
-                        {installState === 'installing' ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Download className="w-6 h-6" />}
-                        {installState === 'installing' ? 'ĐANG CÀI ĐẶT...' : 'CÀI ĐẶT NGAY'}
-                      </button>
+                <div className="pt-6 border-t border-gray-100 space-y-6">
+                  <div className="flex items-center gap-3">
+                    <Activity className="w-5 h-5 text-emerald-600" />
+                    <h4 className="font-black text-gray-900 uppercase text-sm">Theo dõi giao dịch tự động</h4>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-2">Dịch vụ sử dụng</label>
+                        <select 
+                            value={bankConfig.apiService}
+                            onChange={(e) => setBankConfig({...bankConfig, apiService: e.target.value as any})}
+                            className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-gray-900 outline-none focus:border-emerald-500 transition-all"
+                        >
+                            <option value="none">Không sử dụng</option>
+                            <option value="casso">Casso.vn (Khuyên dùng)</option>
+                            <option value="sepay">SePay.vn</option>
+                        </select>
                     </div>
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-2">API Key / Token</label>
+                        <input 
+                            type="password"
+                            value={bankConfig.apiKey}
+                            onChange={(e) => setBankConfig({...bankConfig, apiKey: e.target.value})}
+                            className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-2xl font-bold text-gray-900 outline-none focus:border-emerald-500 transition-all"
+                            placeholder="Dán mã API tại đây..."
+                        />
+                    </div>
+                  </div>
+                  <p className="text-[9px] text-gray-400 font-medium italic">* Ứng dụng sẽ tự động xác nhận thanh toán khi tiền vào tài khoản.</p>
+                </div>
+            </div>
 
-                    <div className="bg-black/20 p-6 rounded-[2rem] border border-white/10 w-full text-left space-y-4">
-                       <div className="flex items-start gap-4">
-                          <div className="bg-white/20 p-2 rounded-lg"><Search className="w-5 h-5" /></div>
-                          <div>
-                            <p className="font-black text-xs uppercase tracking-tight">Kiểm tra sau khi cài:</p>
-                            <p className="text-[10px] text-white/60 font-medium">Vuốt lên để xem tất cả ứng dụng, tìm icon <b>Badminton Pro</b>. Một số máy sẽ gom vào thư mục Chrome.</p>
-                          </div>
-                       </div>
+            {/* Sync Settings Section */}
+            <div className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-blue-600/10 space-y-6">
+                <div className="flex items-center gap-4">
+                    <div className="bg-blue-100 p-3 rounded-2xl text-blue-600"><Link2 className="w-8 h-8" /></div>
+                    <div>
+                        <h3 className="text-2xl font-black text-gray-900 uppercase leading-none">Kết nối máy khác</h3>
+                        <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-1">Sử dụng chung dữ liệu thời gian thực</p>
                     </div>
-                  </>
-                )}
-              </div>
-            )}
-            
+                </div>
+
+                <div className="space-y-4">
+                    <div className="relative group">
+                        <div className="absolute left-6 top-1/2 -translate-y-1/2 text-gray-400"><Key className="w-5 h-5" /></div>
+                        <input 
+                            type="text" 
+                            value={tempSyncId}
+                            onChange={(e) => setTempSyncId(e.target.value.toUpperCase())}
+                            className="w-full pl-14 pr-6 py-5 bg-gray-50 border-4 border-gray-100 rounded-3xl font-black text-xl text-emerald-900 outline-none focus:border-emerald-500 focus:bg-white transition-all shadow-inner"
+                            placeholder="NHẬP MÃ ĐỒNG BỘ..."
+                        />
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                        <button onClick={generateNewSyncId} className="py-4 bg-gray-100 text-gray-500 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 active:scale-95 transition-all">
+                            <RefreshCw className="w-4 h-4" /> Tạo mã mới
+                        </button>
+                        <button onClick={saveSyncId} className="py-4 bg-emerald-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-emerald-100 flex items-center justify-center gap-2 active:scale-95 transition-all">
+                            <ShieldCheck className="w-4 h-4" /> Lưu & Kết nối
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Report Section */}
             <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-gray-100 space-y-6">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto">
@@ -507,26 +575,6 @@ const App: React.FC = () => {
                     </div>
                 </div>
             </div>
-
-            <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden">
-               <h3 className="text-xl font-black text-gray-900 uppercase mb-8 flex items-center gap-3"><CreditCard className="w-7 h-7 text-emerald-600" /> LỊCH SỬ GIAO DỊCH</h3>
-               <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                 {stats.filteredPaid.length > 0 ? (
-                    stats.filteredPaid.slice().reverse().map(b => (
-                        <div key={b.id} className="p-5 bg-gray-50 rounded-2xl flex justify-between items-center border border-gray-100">
-                          <div>
-                            <div className="font-black text-gray-900 uppercase text-sm">{b.customerName}</div>
-                            <div className="text-[9px] font-bold text-gray-400 uppercase">{b.date} • {b.courtId === 0 ? 'Dịch vụ' : `Sân ${b.courtId}`}</div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-lg font-black text-emerald-700">{formatVND(b.totalAmount)}</div>
-                            <div className="text-[8px] font-black text-gray-400 uppercase">LN: +{formatVND(b.totalAmount - (b.serviceItems || []).reduce((s, i) => s + (i.costPrice * i.quantity), 0))}</div>
-                          </div>
-                        </div>
-                    ))
-                 ) : <div className="py-10 text-center opacity-30">Không có dữ liệu</div>}
-               </div>
-            </div>
           </div>
         )}
       </main>
@@ -539,6 +587,47 @@ const App: React.FC = () => {
           </button>
         ))}
       </nav>
+
+      {/* iOS Install Guide Modal */}
+      {showIOSGuide && (
+        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-end justify-center p-0">
+          <div className="bg-white w-full rounded-t-[3rem] animate-in slide-in-from-bottom duration-500 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-emerald-800 p-8 text-white relative">
+              <button onClick={() => setShowIOSGuide(false)} className="absolute top-6 right-6 p-2 bg-white/10 rounded-full"><X className="w-6 h-6" /></button>
+              <Apple className="w-12 h-12 mb-4" />
+              <h3 className="text-2xl font-black uppercase leading-tight">CÀI ĐẶT TRÊN IPHONE</h3>
+              <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest mt-2 opacity-60">Thực hiện 3 bước đơn giản dưới đây</p>
+            </div>
+            <div className="p-8 space-y-10 overflow-y-auto custom-scrollbar">
+              <div className="flex items-center gap-6">
+                <div className="w-12 h-12 shrink-0 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center font-black text-xl border-2 border-emerald-100">1</div>
+                <div className="flex-1">
+                  <p className="font-black text-gray-900 uppercase text-sm">Nhấn nút Chia sẻ</p>
+                  <p className="text-xs text-gray-400 font-medium">Tìm biểu tượng <span className="inline-flex bg-gray-100 p-1 rounded-md mx-1"><Share className="w-3 h-3 text-blue-500" /></span> ở thanh công cụ Safari.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="w-12 h-12 shrink-0 bg-emerald-50 text-emerald-600 rounded-2xl flex items-center justify-center font-black text-xl border-2 border-emerald-100">2</div>
+                <div className="flex-1">
+                  <p className="font-black text-gray-900 uppercase text-sm">Cuộn xuống dưới</p>
+                  <p className="text-xs text-gray-400 font-medium">Vuốt menu chia sẻ lên để thấy thêm các tùy chọn khác.</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6">
+                <div className="w-12 h-12 shrink-0 bg-emerald-600 text-white rounded-2xl flex items-center justify-center font-black text-xl shadow-lg">3</div>
+                <div className="flex-1">
+                  <p className="font-black text-gray-900 uppercase text-sm">Thêm vào MH chính</p>
+                  <p className="text-xs text-gray-400 font-medium italic">Chọn mục "Thêm vào MH chính" (Add to Home Screen) để hoàn tất.</p>
+                </div>
+                <div className="bg-gray-100 p-2 rounded-xl"><Plus className="w-6 h-6 text-gray-600" /></div>
+              </div>
+            </div>
+            <div className="p-8 pt-0 safe-pb">
+              <button onClick={() => setShowIOSGuide(false)} className="w-full py-5 bg-emerald-600 text-white rounded-2xl font-black text-lg shadow-xl shadow-emerald-100">ĐÃ HIỂU</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showQuickPlayMenu && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
@@ -564,7 +653,7 @@ const App: React.FC = () => {
       )}
 
       <BookingModal isOpen={isBookingModalOpen} onClose={() => setIsBookingModalOpen(false)} onConfirm={handleBookingConfirm} courts={COURTS} initialCourtId={pendingBooking?.courtId || 0} dateStr={selectedDate.toLocaleDateString('vi-VN', { weekday: 'short', day: 'numeric', month: 'numeric' })} timeSlot={pendingBooking?.slot || null} allTimeSlots={TIME_SLOTS} checkAvailability={checkAvailability} />
-      <BookingDetailModal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} booking={selectedBookingForDetail} products={products} onUpdateBooking={handleUpdateBooking} onCheckout={handleCheckout} />
+      <BookingDetailModal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} booking={selectedBookingForDetail} products={products} bankConfig={bankConfig} onUpdateBooking={handleUpdateBooking} onCheckout={handleCheckout} />
       <ProductModal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} onConfirm={handleAddNewProductConfirm} />
     </div>
   );

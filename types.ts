@@ -3,7 +3,7 @@ export interface Product {
   id: string;
   name: string;
   price: number;
-  costPrice: number; // Giá vốn nhập kho
+  costPrice: number;
 }
 
 export interface SaleItem {
@@ -11,14 +11,22 @@ export interface SaleItem {
   productName: string;
   quantity: number;
   price: number;
-  costPrice: number; // Lưu giá vốn tại thời điểm bán để báo cáo chính xác
+  costPrice: number;
+}
+
+export interface BankConfig {
+  bankId: string;
+  accountNo: string;
+  accountName: string;
+  apiService: 'none' | 'casso' | 'sepay';
+  apiKey: string;
 }
 
 export interface Booking {
   id: string;
   courtId: number;
-  date: string; // Format: YYYY-MM-DD
-  timeSlot: string; // Format: HH:mm
+  date: string;
+  timeSlot: string;
   actualStartTime?: string; 
   isLive?: boolean; 
   customerName: string;

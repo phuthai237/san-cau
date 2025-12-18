@@ -1,7 +1,8 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { X, User, Phone, ShoppingBag, Plus, Minus, Trash2, CheckCircle, Info, Play, Timer, ChevronRight, Loader2, AlertTriangle } from 'lucide-react';
-import { Booking, Product, SaleItem } from './types';
+// Fix: Added useMemo and Copy to imports to resolve undefined variable errors
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { X, User, Phone, ShoppingBag, Plus, Minus, Trash2, CheckCircle, Info, Play, Timer, ChevronRight, Loader2, AlertTriangle, QrCode, Download, ExternalLink, Landmark, Zap, Search, Copy, Settings } from 'lucide-react';
+import { Booking, Product, SaleItem, BankConfig } from './types';
 import { formatVND, cn } from './utils';
 
 interface BookingDetailModalProps {
@@ -9,6 +10,7 @@ interface BookingDetailModalProps {
   onClose: () => void;
   booking: Booking | null;
   products: Product[];
+  bankConfig: BankConfig;
   onUpdateBooking: (updatedBooking: Booking) => void;
   onCheckout: (booking: Booking, finalDuration: number) => void;
 }
@@ -20,6 +22,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   onClose,
   booking,
   products,
+  bankConfig,
   onUpdateBooking,
   onCheckout
 }) => {
@@ -27,12 +30,19 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   const [now, setNow] = useState(new Date());
   const [confirming, setConfirming] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [showQR, setShowQR] = useState(false);
+  const [isCheckingPayment, setIsCheckingPayment] = useState(false);
+  const [paymentFound, setPaymentFound] = useState(false);
   
+  const pollTimerRef = useRef<any>(null);
+
   useEffect(() => {
     if (booking) {
       setTempDurationSlots(booking.durationSlots || 0);
       setConfirming(false);
       setProcessing(false);
+      setShowQR(false);
+      setPaymentFound(false);
     }
   }, [booking?.id, isOpen]);
 
@@ -44,20 +54,86 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
     return () => clearInterval(interval);
   }, [isOpen, booking?.isLive]);
 
+  // Memoized transaction memo
+  const paymentMemo = useMemo(() => {
+    if (!booking) return '';
+    return `BDP${booking.id.slice(-6).toUpperCase()}`;
+  }, [booking?.id]);
+
+  const serviceTotal = (booking?.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  
+  const currentCourtTotal = useMemo(() => {
+    if (!booking) return 0;
+    if (booking.isLive && booking.actualStartTime) {
+        const start = new Date(booking.actualStartTime);
+        const diffMs = now.getTime() - start.getTime();
+        const liveHrs = diffMs / (1000 * 60 * 60);
+        const slotsUsed = Math.max(1, Math.ceil(liveHrs * 2));
+        return slotsUsed * (PRICE_PER_HOUR / 2);
+    }
+    return booking.courtId === 0 ? 0 : tempDurationSlots * (PRICE_PER_HOUR / 2);
+  }, [booking, tempDurationSlots, now]);
+
+  const finalPayable = Math.max(0, (currentCourtTotal + serviceTotal) - (booking?.deposit || 0));
+
+  // Polling logic for Casso/SePay
+  const checkTransactions = useCallback(async () => {
+    if (!bankConfig.apiKey || bankConfig.apiService === 'none' || paymentFound || !showQR) return;
+
+    setIsCheckingPayment(true);
+    try {
+      let found = false;
+      if (bankConfig.apiService === 'casso') {
+        const response = await fetch('https://api.casso.vn/v2/transactions?pageSize=10', {
+          headers: { 'Authorization': `Apikey ${bankConfig.apiKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          found = data.data?.records?.some((t: any) => 
+            t.description.toUpperCase().includes(paymentMemo) && 
+            t.amount >= finalPayable
+          );
+        }
+      } else if (bankConfig.apiService === 'sepay') {
+        const response = await fetch(`https://my.sepay.vn/api/transactions/list?account_number=${bankConfig.accountNo}&limit=10`, {
+          headers: { 'Authorization': `Bearer ${bankConfig.apiKey}` }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          found = data.items?.some((t: any) => 
+            t.content.toUpperCase().includes(paymentMemo) && 
+            parseFloat(t.amount) >= finalPayable
+          );
+        }
+      }
+
+      if (found) {
+        setPaymentFound(true);
+        setTimeout(() => {
+          onCheckout(booking!, tempDurationSlots);
+          setShowQR(false);
+        }, 1500);
+      }
+    } catch (e) {
+      console.error('Lỗi check giao dịch:', e);
+    } finally {
+      setIsCheckingPayment(false);
+    }
+  }, [bankConfig, paymentMemo, finalPayable, paymentFound, showQR, booking, tempDurationSlots, onCheckout]);
+
+  useEffect(() => {
+    if (showQR && bankConfig.apiKey && bankConfig.apiService !== 'none' && !paymentFound) {
+      pollTimerRef.current = setInterval(checkTransactions, 5000); // Check every 5s
+    } else {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    }
+    return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); };
+  }, [showQR, bankConfig.apiKey, bankConfig.apiService, checkTransactions, paymentFound]);
+
   if (!isOpen || !booking) return null;
 
   const isShopOnly = booking.courtId === 0;
   const isLive = booking.isLive;
-
-  let liveHours = 0;
-  let livePrice = 0;
-  if (isLive && booking.actualStartTime) {
-    const start = new Date(booking.actualStartTime);
-    const diffMs = now.getTime() - start.getTime();
-    liveHours = diffMs / (1000 * 60 * 60);
-    const slotsUsed = Math.max(1, Math.ceil(liveHours * 2));
-    livePrice = slotsUsed * (PRICE_PER_HOUR / 2);
-  }
 
   const handleAddProduct = (product: Product) => {
     const items = [...(booking.serviceItems || [])];
@@ -70,7 +146,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
         productName: product.name, 
         quantity: 1, 
         price: product.price,
-        costPrice: product.costPrice || 0 // Lưu giá vốn vào SaleItem
+        costPrice: product.costPrice || 0
       });
     }
     updateTotals(items, tempDurationSlots);
@@ -82,15 +158,15 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
   };
 
   const updateTotals = (items: SaleItem[], duration: number) => {
-    const serviceTotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    let courtTotal = isLive ? livePrice : (isShopOnly ? 0 : duration * (PRICE_PER_HOUR / 2));
+    const sTotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    let cTotal = isLive ? currentCourtTotal : (isShopOnly ? 0 : duration * (PRICE_PER_HOUR / 2));
     
     onUpdateBooking({
       ...booking,
       serviceItems: items,
       durationSlots: duration,
-      totalAmount: courtTotal + serviceTotal,
-      remainingAmount: (courtTotal + serviceTotal) - booking.deposit
+      totalAmount: cTotal + sTotal,
+      remainingAmount: (cTotal + sTotal) - booking.deposit
     });
   };
 
@@ -101,10 +177,6 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
     updateTotals(booking.serviceItems || [], newDuration);
   };
 
-  const serviceTotal = (booking.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  const currentCourtTotal = isLive ? livePrice : (isShopOnly ? 0 : tempDurationSlots * (PRICE_PER_HOUR / 2));
-  const finalPayable = Math.max(0, (currentCourtTotal + serviceTotal) - booking.deposit);
-
   const handleFinalPay = (e: React.MouseEvent) => {
     e.preventDefault();
     if (!confirming) {
@@ -113,14 +185,27 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
       return;
     }
     setProcessing(true);
-    setTimeout(() => {
-      onCheckout(booking, tempDurationSlots);
-    }, 100);
+    setTimeout(() => { onCheckout(booking, tempDurationSlots); }, 100);
+  };
+
+  const handleQRClick = () => {
+    if (!bankConfig.accountNo) {
+      alert("CHƯA CẤU HÌNH NGÂN HÀNG!\nVui lòng vào tab Admin để nhập Số tài khoản trước khi dùng QR.");
+      return;
+    }
+    setShowQR(true);
+  };
+
+  const getQRUrl = () => {
+    if (!bankConfig.accountNo) return '';
+    return `https://img.vietqr.io/image/${bankConfig.bankId}-${bankConfig.accountNo}-compact.png?amount=${finalPayable}&addInfo=${encodeURIComponent(paymentMemo)}&accountName=${encodeURIComponent(bankConfig.accountName)}`;
   };
 
   return (
-    <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm pointer-events-auto">
       <div className="bg-white rounded-t-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-5xl h-[95dvh] md:h-auto md:max-h-[92dvh] flex flex-col overflow-hidden border-t-8 border-emerald-900 animate-in slide-in-from-bottom duration-300">
+        
+        {/* Modal Header */}
         <div className="bg-emerald-900 px-6 py-5 md:px-10 md:py-6 flex items-center justify-between shrink-0 shadow-lg relative z-10" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top))' }}>
           <div className="flex items-center gap-4">
             {isLive ? <Timer className="w-8 h-8 md:w-10 md:h-10 text-emerald-400 animate-pulse" /> : <Info className="w-8 h-8 md:w-10 md:h-10 text-white" />} 
@@ -137,6 +222,8 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
             <X className="w-7 h-7" />
           </button>
         </div>
+
+        {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-gray-50 flex flex-col gap-6 custom-scrollbar pb-48 md:pb-10">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="space-y-6">
@@ -150,17 +237,17 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                   <div className="text-lg font-black text-gray-900">{booking.phoneNumber}</div>
                 </div>
               </section>
+
               {isLive ? (
                 <section className="bg-blue-600 p-8 rounded-[2.5rem] text-white shadow-xl text-center">
                   <p className="text-[10px] font-black uppercase text-blue-100 mb-4 tracking-[0.2em]">THỜI GIAN THỰC TẾ</p>
                   <div className="text-5xl md:text-6xl font-black tabular-nums tracking-tighter">
-                    {Math.floor(liveHours).toString().padStart(2, '0')}:
-                    {Math.floor((liveHours % 1) * 60).toString().padStart(2, '0')}:
-                    {Math.floor(((liveHours * 60) % 1) * 60).toString().padStart(2, '0')}
+                    {Math.floor(currentCourtTotal / (PRICE_PER_HOUR / 2) / 2).toString().padStart(2, '0')}:
+                    {Math.floor(((currentCourtTotal / (PRICE_PER_HOUR / 2) / 2) % 1) * 60).toString().padStart(2, '0')}
                   </div>
                   <div className="mt-6 pt-6 border-t border-white/20 flex justify-between items-center px-4">
                     <span className="text-[10px] font-black uppercase text-blue-200">Tiền sân tạm tính</span>
-                    <span className="text-2xl font-black">{formatVND(livePrice)}</span>
+                    <span className="text-2xl font-black">{formatVND(currentCourtTotal)}</span>
                   </div>
                 </section>
               ) : !isShopOnly && (
@@ -174,6 +261,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                 </section>
               )}
             </div>
+
             <div className="space-y-6">
               <section className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
                 <h4 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-widest flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> THÊM DỊCH VỤ</h4>
@@ -186,6 +274,7 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                   ))}
                 </div>
               </section>
+
               <section className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex-1 flex flex-col min-h-[180px]">
                 <h4 className="text-[10px] font-black text-gray-900 uppercase mb-4 tracking-widest">ĐÃ CHỌN ({booking.serviceItems?.length || 0})</h4>
                 <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
@@ -198,12 +287,13 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                       <button onClick={() => handleRemoveProduct(item.productId)} className="p-2 text-rose-500 hover:bg-rose-100 rounded-lg active:scale-90"><Trash2 className="w-5 h-5" /></button>
                     </div>
                   ))}
-                  {(!booking.serviceItems || booking.serviceItems.length === 0) && <div className="text-center py-8 text-gray-300 text-[10px] font-bold uppercase italic opacity-50">Chưa có sản phẩm</div>}
                 </div>
               </section>
             </div>
           </div>
         </div>
+
+        {/* Bottom Bar */}
         <div className="shrink-0 bg-white border-t border-gray-200 p-6 md:p-8 flex flex-col gap-6 shadow-[0_-15px_30px_rgba(0,0,0,0.08)] relative z-20" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
           <div className="bg-emerald-950 rounded-[2rem] p-6 text-white flex items-center justify-between shadow-2xl border-t border-white/10">
              <div className="space-y-1">
@@ -220,13 +310,105 @@ export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
                 {booking.deposit > 0 && <div className="text-[9px] font-black text-rose-500 uppercase">ĐÃ CỌC: -{formatVND(booking.deposit)}</div>}
              </div>
           </div>
+
           <div className="flex gap-4">
-            <button onClick={onClose} className="flex-1 py-5 bg-gray-100 text-gray-500 text-sm font-black rounded-2xl uppercase tracking-widest active:scale-95 transition-all hover:bg-gray-200">Hủy bỏ</button>
-            <button disabled={processing} onClick={handleFinalPay} className={cn("flex-[2.5] py-5 text-white text-xl font-black rounded-2xl shadow-2xl uppercase tracking-tight flex items-center justify-center gap-3 active:scale-95 transition-all touch-manipulation relative overflow-hidden", processing ? "bg-emerald-900" : confirming ? "bg-amber-500 scale-105" : "bg-emerald-600 shadow-emerald-200")}>
-              {processing ? <Loader2 className="w-8 h-8 animate-spin" /> : confirming ? <><AlertTriangle className="w-7 h-7 animate-bounce" /> BẤM LẦN NỮA ĐỂ XÁC NHẬN!</> : <><CheckCircle className="w-7 h-7 stroke-[3px]" /> XÁC NHẬN THANH TOÁN</>}
+            <button onClick={onClose} className="px-4 py-5 bg-gray-100 text-gray-500 text-[10px] font-black rounded-2xl uppercase tracking-widest active:scale-95 transition-all">Hủy</button>
+            
+            <button 
+              onClick={handleQRClick}
+              className={cn(
+                "flex-1 py-5 rounded-2xl font-black uppercase tracking-tight flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xl",
+                bankConfig.accountNo ? "bg-emerald-100 text-emerald-700 border-2 border-emerald-200" : "bg-gray-100 text-gray-400 border-2 border-dashed border-gray-300"
+              )}
+            >
+              <QrCode className="w-6 h-6" />
+              <span className="hidden sm:inline">QUÉT MÃ QR</span>
+              <span className="sm:hidden">QR</span>
+            </button>
+
+            <button 
+              disabled={processing}
+              onClick={handleFinalPay}
+              className={cn(
+                "flex-[1.5] py-5 text-white text-base md:text-xl font-black rounded-2xl shadow-2xl uppercase tracking-tight flex items-center justify-center gap-3 active:scale-95 transition-all relative overflow-hidden",
+                processing ? "bg-emerald-900" : confirming ? "bg-amber-500 scale-105" : "bg-emerald-600 shadow-emerald-200"
+              )}
+            >
+              {processing ? <Loader2 className="w-8 h-8 animate-spin" /> : confirming ? "BẤM LẠI ĐỂ CHỐT!" : <><CheckCircle className="w-6 h-6 stroke-[3px]" /> <span className="hidden sm:inline">TIỀN MẶT</span><span className="sm:hidden">XONG</span></>}
             </button>
           </div>
         </div>
+
+        {/* Fullscreen QR Modal with Auto Polling */}
+        {showQR && (
+          <div className="fixed inset-0 z-[100000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-300">
+            <div className="bg-white w-full max-w-sm rounded-[3rem] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
+                <div className={cn("p-6 text-center text-white relative transition-colors duration-500", paymentFound ? "bg-emerald-500" : "bg-emerald-600")}>
+                   <button onClick={() => setShowQR(false)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full"><X className="w-6 h-6" /></button>
+                   <Landmark className="w-10 h-10 mx-auto mb-2 opacity-60" />
+                   <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1">
+                     {paymentFound ? 'THANH TOÁN THÀNH CÔNG!' : 'MÃ CHUYỂN KHOẢN'}
+                   </p>
+                   <p className="text-3xl font-black">{formatVND(finalPayable)}</p>
+                </div>
+                
+                <div className="p-8 space-y-6 text-center">
+                    <div className="bg-gray-50 p-4 rounded-3xl border-2 border-dashed border-gray-200 relative group overflow-hidden">
+                        {paymentFound ? (
+                          <div className="w-full aspect-square flex flex-col items-center justify-center animate-in zoom-in duration-500">
+                            <div className="w-32 h-32 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
+                               <CheckCircle className="w-20 h-20 stroke-[3px]" />
+                            </div>
+                            <p className="font-black text-emerald-600 uppercase">Đã nhận được tiền</p>
+                            <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Đang hoàn tất...</p>
+                          </div>
+                        ) : (
+                          <>
+                            <img src={getQRUrl()} alt="VietQR" className="w-full h-auto rounded-xl shadow-lg" />
+                            {isCheckingPayment && (
+                              <div className="absolute top-4 right-4 bg-white/90 p-2 rounded-full shadow-md flex items-center gap-2">
+                                <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
+                                <span className="text-[8px] font-black text-emerald-900 uppercase">Đang chờ tiền...</span>
+                              </div>
+                            )}
+                          </>
+                        )}
+                    </div>
+                    
+                    {!paymentFound && (
+                      <>
+                        <div>
+                            <p className="text-xl font-black text-gray-900 uppercase tracking-tight">{bankConfig.accountName}</p>
+                            <p className="text-sm font-bold text-emerald-600 uppercase tracking-widest">{bankConfig.accountNo} • {bankConfig.bankId.toUpperCase()}</p>
+                        </div>
+
+                        <div className="bg-emerald-50 p-4 rounded-2xl relative">
+                            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1 text-left">NỘI DUNG (QUAN TRỌNG)</p>
+                            <div className="flex items-center justify-between">
+                              <p className="text-lg font-black text-emerald-900 text-left">{paymentMemo}</p>
+                              <button onClick={() => { navigator.clipboard.writeText(paymentMemo); alert("Đã copy nội dung!"); }} className="p-2 bg-emerald-600 text-white rounded-lg active:scale-90"><Copy className="w-4 h-4" /></button>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col gap-3">
+                          {bankConfig.apiKey && (
+                             <button 
+                               onClick={checkTransactions}
+                               disabled={isCheckingPayment}
+                               className="w-full py-3 bg-emerald-100 text-emerald-700 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 active:scale-95 transition-all"
+                             >
+                               <Search className={cn("w-4 h-4", isCheckingPayment && "animate-spin")} /> 
+                               Kiểm tra giao dịch
+                             </button>
+                          )}
+                          <button onClick={() => setShowQR(false)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black uppercase shadow-xl active:scale-95">ĐÓNG</button>
+                        </div>
+                      </>
+                    )}
+                </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

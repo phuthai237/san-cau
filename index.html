@@ -5,14 +5,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     
+    <!-- iOS support -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Badminton Pro" />
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
+    
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#064e3b" />
     <meta name="format-detection" content="telephone=no" />
     
-    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
     <link rel="manifest" href="/manifest.json" />
     
@@ -49,8 +51,6 @@
       .custom-scrollbar::-webkit-scrollbar { width: 4px; }
       .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
       .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
-      
-      input { -webkit-appearance: none; border-radius: 0; }
     </style>
     <script type="importmap">
     {
@@ -66,7 +66,6 @@
 </head>
   <body>
     <div id="root"></div>
-    <!-- Sử dụng đường dẫn tuyệt đối /index.tsx -->
     <script type="module" src="/index.tsx"></script>
     <script>
       if ('serviceWorker' in navigator) {
@@ -74,7 +73,6 @@
           navigator.serviceWorker.register('/sw.js', { scope: '/' })
             .then(reg => {
               console.log('SW Registered');
-              // Kiểm tra cập nhật SW ngay lập tức
               reg.update();
             })
             .catch(err => console.log('SW Failed', err));
