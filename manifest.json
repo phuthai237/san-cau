@@ -1,17 +1,16 @@
 
 {
-  "name": "Badminton Booking Pro",
+  "name": "Badminton Pro Manager",
   "short_name": "Badminton Pro",
   "description": "Quản lý sân cầu lông chuyên nghiệp và dịch vụ đi kèm.",
-  "id": "badminton-pro-pwa",
-  "start_url": "index.html",
+  "id": "badminton-pro-manager-unique-id",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
-  "background_color": "#f9fafb",
-  "theme_color": "#059669",
-  "categories": ["business", "sports", "productivity"],
+  "background_color": "#064e3b",
+  "theme_color": "#064e3b",
   "icons": [
     {
       "src": "https://cdn-icons-png.flaticon.com/512/3058/3058284.png",

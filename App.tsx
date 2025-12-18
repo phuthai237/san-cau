@@ -6,7 +6,7 @@ import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, CreditCard, Play, X, CheckCircle, Cloud, RefreshCw, Smartphone, Download, Apple, ShieldCheck, Share, MoveDown, TrendingUp, Filter, Wallet, PieChart, Bell, Zap, Info } from 'lucide-react';
 
 const COURTS: CourtType[] = [
   { id: 1, name: 'Sân Số 1 (VIP)' },
@@ -57,13 +57,25 @@ const App: React.FC = () => {
     const ua = window.navigator.userAgent.toLowerCase();
     if (/iphone|ipad|ipod/.test(ua)) setPlatform('ios');
     else if (/android/.test(ua)) setPlatform('android');
+
+    // Kiểm tra xem app đã chạy ở chế độ Standalone (đã cài đặt) chưa
     if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
       setIsStandalone(true);
     }
-    const handler = (e: any) => { e.preventDefault(); setDeferredPrompt(e); };
-    window.addEventListener('beforeinstallprompt', handler);
 
-    // Yêu cầu quyền thông báo ngay khi app load
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      console.log('PWA Ready');
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', () => {
+      setIsStandalone(true);
+      setDeferredPrompt(null);
+      alert("🎉 Cài đặt thành công! Bây giờ bạn có thể mở app từ màn hình chính.");
+    });
+
     if ("Notification" in window) {
       setNotifPermission(Notification.permission);
       if (Notification.permission === 'default') {
@@ -71,15 +83,26 @@ const App: React.FC = () => {
       }
     }
 
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
   }, []);
 
   const handleInstallClick = async () => {
-    if (platform === 'ios') { setShowIOSGuide(true); return; }
-    if (!deferredPrompt) { alert("Để cài đặt:\n1. Android: Nhấn 3 chấm -> 'Cài đặt ứng dụng'.\n2. iPhone: Nhấn nút Chia sẻ -> 'Thêm vào MH chính'."); return; }
-    deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === 'accepted') { setDeferredPrompt(null); setIsStandalone(true); }
+    if (platform === 'ios') { 
+      setShowIOSGuide(true); 
+      return; 
+    }
+    
+    if (deferredPrompt) { 
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      if (outcome === 'accepted') { 
+        setDeferredPrompt(null); 
+      }
+    } else {
+      alert("💡 HƯỚNG DẪN CÀI ĐẶT:\n\n1. Nhấn vào nút 3 chấm (Menu) ở góc trên bên phải Chrome.\n2. Chọn dòng 'Cài đặt ứng dụng' (Install app) hoặc 'Thêm vào màn hình chính'.\n3. Sau đó app sẽ xuất hiện trên màn hình điện thoại như một ứng dụng thông thường.");
+    }
   };
 
   useEffect(() => {
@@ -194,7 +217,7 @@ const App: React.FC = () => {
     setBookings((prev) => [...prev, ...newBookings]);
     setIsBookingModalOpen(false);
 
-    sendNotification("✅ Đặt lịch thành công", `${data.name} đã đặt sân cho ${dateKey} lúc ${pendingBooking.slot.time}`);
+    sendNotification("✅ Đặt lịch thành công", `${data.name} đã đặt sân lúc ${pendingBooking.slot.time}`);
   }, [pendingBooking, dateKey]);
 
   const handleUpdateBooking = useCallback((updated: Booking) => {
@@ -275,13 +298,6 @@ const App: React.FC = () => {
       const bDate = new Date(b.date);
       return b.status === 'paid' && bDate >= start && bDate <= end;
     });
-    const activeBookings = bookings.filter(b => b.status === 'active');
-    const processedGroups = new Set<string>();
-    let totalDeposit = 0;
-    activeBookings.forEach(b => {
-      const gId = b.groupId || b.id;
-      if (!processedGroups.has(gId)) { totalDeposit += b.deposit; processedGroups.add(gId); }
-    });
 
     let totalRevenue = 0;
     let totalServicesRevenue = 0;
@@ -299,7 +315,7 @@ const App: React.FC = () => {
 
     const totalProfit = totalRevenue - totalCost;
 
-    return { totalRevenue, totalDeposit, totalServicesRevenue, totalCourtRevenue, totalCost, totalProfit, filteredPaid, start, end };
+    return { totalRevenue, totalServicesRevenue, totalCourtRevenue, totalCost, totalProfit, filteredPaid, start, end };
   }, [bookings, statsPeriod, statsAnchorDate]);
 
   const adjustStatsAnchor = (delta: number) => {
@@ -309,13 +325,6 @@ const App: React.FC = () => {
     else if (statsPeriod === 'month') d.setMonth(d.getMonth() + delta);
     setStatsAnchorDate(d);
   };
-
-  const statsTitle = useMemo(() => {
-    if (statsPeriod === 'day') return statsAnchorDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'long' });
-    if (statsPeriod === 'week') return `Tuần ${stats.start.toLocaleDateString('vi-VN')} - ${stats.end.toLocaleDateString('vi-VN')}`;
-    if (statsPeriod === 'month') return statsAnchorDate.toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' });
-    return '';
-  }, [statsPeriod, statsAnchorDate, stats]);
 
   const handleAddNewProductConfirm = (data: Omit<Product, 'id'>) => {
     setProducts(prev => [...prev, { 
@@ -336,7 +345,7 @@ const App: React.FC = () => {
                 {syncId && (
                   <>
                     <div className={cn("w-2 h-2 rounded-full", syncStatus === 'success' ? "bg-emerald-500" : syncStatus === 'error' ? "bg-rose-500" : "bg-amber-500 animate-pulse")}></div>
-                    <span className="text-[8px] font-black uppercase text-gray-400 tracking-widest">{syncStatus === 'success' ? 'Cloud Online' : syncStatus === 'error' ? 'Offline' : 'Syncing...'}</span>
+                    <span className="text-[8px] font-black uppercase text-gray-400 tracking-widest">{syncStatus === 'success' ? 'Online' : 'Syncing...'}</span>
                   </>
                 )}
                 {notifPermission === 'granted' && <Bell className="w-2.5 h-2.5 text-emerald-500" />}
@@ -344,10 +353,10 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setShowQuickPlayMenu(true)} className="px-5 py-3 bg-emerald-600 text-white rounded-2xl flex items-center gap-2 font-black text-xs md:text-sm shadow-xl shadow-emerald-200 active:scale-95 transition-all">
+            <button onClick={() => setShowQuickPlayMenu(true)} className="px-5 py-3 bg-emerald-600 text-white rounded-2xl flex items-center gap-2 font-black text-xs md:text-sm shadow-xl active:scale-95 transition-all">
               <Play className="w-3.5 h-3.5 fill-white" /> CHƠI NGAY
             </button>
-            <button onClick={() => { if(window.confirm("Xóa sạch dữ liệu hệ thống?")) { setBookings([]); localStorage.clear(); window.location.reload(); } }} className="p-3 bg-rose-50 text-rose-500 rounded-2xl active:scale-95">
+            <button onClick={() => { if(window.confirm("Xóa sạch dữ liệu?")) { setBookings([]); localStorage.clear(); window.location.reload(); } }} className="p-3 bg-rose-50 text-rose-500 rounded-2xl">
               <Trash2 className="w-5 h-5" />
             </button>
           </div>
@@ -358,12 +367,12 @@ const App: React.FC = () => {
         {activeTab === 'calendar' && (
           <div className="space-y-6 md:space-y-12">
             <div className="bg-white p-4 rounded-[2.5rem] shadow-xl border border-gray-100 flex items-center justify-between">
-              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d); }} className="p-4 hover:bg-emerald-50 rounded-2xl text-gray-400 active:scale-90"><ChevronLeft className="w-8 h-8" /></button>
+              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d); }} className="p-4 hover:bg-emerald-50 rounded-2xl text-gray-400"><ChevronLeft className="w-8 h-8" /></button>
               <div className="text-center">
-                <span className="text-[10px] uppercase font-black text-emerald-500 tracking-[0.2em] block mb-1">LỊCH THI ĐẤU</span>
-                <div className="text-xl md:text-5xl font-black text-gray-900 tracking-tighter uppercase">{selectedDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'long' })}</div>
+                <span className="text-[10px] uppercase font-black text-emerald-500 tracking-[0.2em] block mb-1">LỊCH TRÌNH</span>
+                <div className="text-xl md:text-5xl font-black text-gray-900 uppercase">{selectedDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'long' })}</div>
               </div>
-              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d); }} className="p-4 hover:bg-emerald-50 rounded-2xl text-gray-400 active:scale-90"><ChevronRight className="w-8 h-8" /></button>
+              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d); }} className="p-4 hover:bg-emerald-50 rounded-2xl text-gray-400"><ChevronRight className="w-8 h-8" /></button>
             </div>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12">
               {COURTS.map(court => (
@@ -382,25 +391,28 @@ const App: React.FC = () => {
           <div className="space-y-6 animate-in slide-in-from-bottom duration-300">
              <div className="flex justify-between items-center bg-white p-8 rounded-[2.5rem] shadow-lg border border-gray-100">
               <div>
-                <h2 className="text-3xl font-black text-gray-900 tracking-tight">KHO HÀNG</h2>
-                <p className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-1">Danh sách sản phẩm dịch vụ</p>
+                <h2 className="text-3xl font-black text-gray-900 tracking-tight uppercase">Kho hàng</h2>
+                <p className="text-gray-400 font-bold text-[10px] uppercase tracking-[0.2em] mt-1">Sản phẩm & Dịch vụ</p>
               </div>
-              <button onClick={() => setIsProductModalOpen(true)} className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all"><Plus className="w-5 h-5 stroke-[4px]" /> THÊM MỚI</button>
+              <button 
+                onClick={() => setIsProductModalOpen(true)} 
+                className="px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black flex items-center gap-3 shadow-xl active:scale-95 transition-all"
+              >
+                <Plus className="w-5 h-5 stroke-[4px]" /> THÊM MỚI
+              </button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
               {products.map(p => (
                 <div key={p.id} className="bg-white p-6 rounded-[2rem] border-2 border-gray-50 shadow-sm flex flex-col justify-between group hover:border-emerald-500 transition-all">
                   <div className="mb-4">
                     <div className="flex justify-between items-start mb-4">
-                      <div className="bg-gray-100 w-12 h-12 rounded-xl flex items-center justify-center text-gray-400 group-hover:bg-emerald-100 group-hover:text-emerald-600 transition-colors"><ShoppingBag className="w-6 h-6" /></div>
-                      <button onClick={() => setProducts(products.filter(x => x.id !== p.id))} className="p-2 text-gray-300 hover:text-rose-500 transition-colors"><Trash2 className="w-5 h-5" /></button>
+                      <div className="bg-gray-100 w-12 h-12 rounded-xl flex items-center justify-center text-gray-400"><ShoppingBag className="w-6 h-6" /></div>
+                      <button onClick={() => setProducts(products.filter(x => x.id !== p.id))} className="p-2 text-gray-300 hover:text-rose-500"><Trash2 className="w-5 h-5" /></button>
                     </div>
-                    <div className="text-xl font-black text-gray-900 leading-none tracking-tight uppercase mb-4">{p.name}</div>
-                    <div className="space-y-2">
-                        <div className="flex justify-between items-center px-4 py-3 bg-emerald-50 rounded-xl">
-                            <span className="text-[10px] font-black text-emerald-600 uppercase">Giá bán</span>
-                            <span className="font-black text-emerald-900 text-lg">{formatVND(p.price)}</span>
-                        </div>
+                    <div className="text-xl font-black text-gray-900 uppercase mb-4">{p.name}</div>
+                    <div className="flex justify-between items-center px-4 py-3 bg-emerald-50 rounded-xl">
+                        <span className="text-[10px] font-black text-emerald-600 uppercase">Giá bán</span>
+                        <span className="font-black text-emerald-900 text-lg">{formatVND(p.price)}</span>
                     </div>
                   </div>
                 </div>
@@ -411,150 +423,100 @@ const App: React.FC = () => {
 
         {activeTab === 'stats' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            <div className={cn("p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden transition-all duration-500", isStandalone ? "bg-emerald-600" : "bg-blue-600")}>
-               <div className="absolute right-[-5%] top-[-10%] opacity-10"><ShieldCheck className="w-40 h-40" /></div>
-               <div className="relative z-10 flex flex-col md:flex-row items-center gap-8">
-                  <div className="flex-1 text-center md:text-left">
-                    <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">{isStandalone ? "CHẾ ĐỘ NATIVE APP" : "CÀI ĐẶT ỨNG DỤNG MOBILE"}</h3>
-                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">{isStandalone ? "Ứng dụng đang chạy mượt mà ở chế độ toàn màn hình." : "Đưa ứng dụng ra màn hình chính để sử dụng mượt mà hơn như app thật."}</p>
+            {/* PWA Install Status for Android */}
+            {!isStandalone && (
+              <div className="bg-emerald-600 p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center gap-8 group">
+                <div className="absolute right-[-5%] top-[-10%] opacity-10"><Zap className="w-40 h-40 group-hover:scale-110 transition-transform duration-500" /></div>
+                <div className="flex-1 text-center md:text-left">
+                  <div className="flex items-center gap-2 justify-center md:justify-start mb-2">
+                    <span className="px-3 py-1 bg-white/20 rounded-full text-[10px] font-black uppercase tracking-widest">PWA Mode</span>
+                    {deferredPrompt ? (
+                      <span className="px-3 py-1 bg-emerald-400 text-emerald-950 rounded-full text-[10px] font-black uppercase tracking-widest animate-pulse">Sẵn sàng cài đặt</span>
+                    ) : (
+                      <span className="px-3 py-1 bg-white/10 rounded-full text-[10px] font-black uppercase tracking-widest">Hỗ trợ Android</span>
+                    )}
                   </div>
-                  {!isStandalone && (
-                    <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-blue-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all"><Download className="w-6 h-6" /> CÀI ĐẶT NGAY</button>
-                  )}
-               </div>
-            </div>
+                  <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">CÀI ĐẶT ỨNG DỤNG</h3>
+                  <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">Cài đặt để sử dụng như app thật trên màn hình chính, không cần trình duyệt.</p>
+                </div>
+                <button onClick={handleInstallClick} className="px-10 py-5 bg-white text-emerald-700 rounded-2xl font-black flex items-center justify-center gap-3 shadow-xl active:scale-95 transition-all">
+                  <Download className="w-6 h-6" /> CÀI ĐẶT NGAY
+                </button>
+              </div>
+            )}
+
+            {isStandalone && (
+              <div className="bg-white p-6 rounded-[2rem] border-4 border-emerald-500/20 flex items-center gap-4">
+                 <div className="bg-emerald-500 p-3 rounded-xl text-white"><ShieldCheck className="w-6 h-6" /></div>
+                 <div>
+                   <div className="font-black text-emerald-900 text-sm uppercase">Đã cài đặt thành công</div>
+                   <div className="text-[10px] font-bold text-emerald-600 uppercase tracking-widest">Bạn đang sử dụng phiên bản App Native</div>
+                 </div>
+              </div>
+            )}
             
             <div className="bg-white p-6 rounded-[2.5rem] shadow-xl border border-gray-100 space-y-6">
                 <div className="flex flex-col md:flex-row items-center justify-between gap-4">
                     <div className="flex bg-gray-100 p-1.5 rounded-2xl w-full md:w-auto">
                         {(['day', 'week', 'month'] as const).map(p => (
-                            <button
-                                key={p}
-                                onClick={() => { setStatsPeriod(p); setStatsAnchorDate(new Date()); }}
-                                className={cn(
-                                    "flex-1 md:px-8 py-3 rounded-xl font-black text-xs uppercase transition-all",
-                                    statsPeriod === p ? "bg-white text-emerald-700 shadow-md" : "text-gray-400"
-                                )}
-                            >
+                            <button key={p} onClick={() => { setStatsPeriod(p); setStatsAnchorDate(new Date()); }} className={cn("flex-1 md:px-8 py-3 rounded-xl font-black text-xs uppercase transition-all", statsPeriod === p ? "bg-white text-emerald-700 shadow-md" : "text-gray-400")}>
                                 {p === 'day' ? 'Ngày' : p === 'week' ? 'Tuần' : 'Tháng'}
                             </button>
                         ))}
                     </div>
-                    <div className="flex items-center gap-6 bg-emerald-50 px-6 py-3 rounded-2xl w-full md:w-auto justify-between">
-                        <button onClick={() => adjustStatsAnchor(-1)} className="p-2 text-emerald-600 hover:bg-white rounded-xl active:scale-90 transition-all"><ChevronLeft className="w-6 h-6" /></button>
-                        <span className="font-black text-emerald-900 uppercase tracking-tight text-sm whitespace-nowrap">{statsTitle}</span>
-                        <button onClick={() => adjustStatsAnchor(1)} className="p-2 text-emerald-600 hover:bg-white rounded-xl active:scale-90 transition-all"><ChevronRight className="w-6 h-6" /></button>
+                    <div className="flex items-center gap-6 bg-emerald-50 px-6 py-3 rounded-2xl">
+                        <button onClick={() => adjustStatsAnchor(-1)} className="p-2 text-emerald-600"><ChevronLeft className="w-6 h-6" /></button>
+                        <span className="font-black text-emerald-900 uppercase text-sm">BÁO CÁO</span>
+                        <button onClick={() => adjustStatsAnchor(1)} className="p-2 text-emerald-600"><ChevronRight className="w-6 h-6" /></button>
                     </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-emerald-600 p-8 rounded-[2.5rem] text-white shadow-2xl shadow-emerald-200 space-y-2 relative overflow-hidden">
+                    <div className="bg-emerald-600 p-8 rounded-[2.5rem] text-white shadow-2xl space-y-2 relative overflow-hidden">
                         <div className="absolute right-[-10%] bottom-[-10%] opacity-10"><PieChart className="w-32 h-32" /></div>
-                        <div className="text-[10px] font-black text-emerald-100 uppercase tracking-widest flex items-center gap-2">
-                            <TrendingUp className="w-4 h-4" /> LỢI NHUẬN THỰC (ĐÃ TRỪ VỐN)
-                        </div>
-                        <div className="text-3xl md:text-5xl font-black tracking-tighter text-white">{formatVND(stats.totalProfit)}</div>
-                        <p className="text-[10px] font-bold text-emerald-200 uppercase opacity-60">Lợi nhuận = Doanh thu - Giá vốn sản phẩm</p>
+                        <div className="text-[10px] font-black text-emerald-100 uppercase tracking-widest flex items-center gap-2"><TrendingUp className="w-4 h-4" /> LỢI NHUẬN THỰC</div>
+                        <div className="text-3xl md:text-5xl font-black tracking-tighter">{formatVND(stats.totalProfit)}</div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 md:col-span-2">
-                        <div className="bg-emerald-950 p-6 rounded-[2rem] text-white shadow-lg space-y-1">
-                            <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest">TỔNG DOANH THU</div>
-                            <div className="text-xl md:text-3xl font-black tracking-tighter text-emerald-100">{formatVND(stats.totalRevenue)}</div>
+                        <div className="bg-emerald-950 p-6 rounded-[2rem] text-white space-y-1">
+                            <div className="text-[9px] font-black text-emerald-400 uppercase">TỔNG DOANH THU</div>
+                            <div className="text-xl font-black">{formatVND(stats.totalRevenue)}</div>
                         </div>
                         <div className="bg-rose-50 p-6 rounded-[2rem] border border-rose-100 space-y-1">
-                            <div className="text-[9px] font-black text-rose-400 uppercase tracking-widest">TỔNG GIÁ VỐN</div>
-                            <div className="text-xl md:text-3xl font-black tracking-tighter text-rose-700">{formatVND(stats.totalCost)}</div>
-                        </div>
-                        <div className="bg-white border-2 border-emerald-50 p-6 rounded-[2rem] shadow-sm space-y-1">
-                            <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TIỀN SÂN</div>
-                            <div className="text-xl md:text-2xl font-black tracking-tighter text-emerald-900">{formatVND(stats.totalCourtRevenue)}</div>
-                        </div>
-                        <div className="bg-white border-2 border-emerald-50 p-6 rounded-[2rem] shadow-sm space-y-1">
-                            <div className="text-[9px] font-black text-gray-400 uppercase tracking-widest">TIỀN DỊCH VỤ</div>
-                            <div className="text-xl md:text-2xl font-black tracking-tighter text-blue-800">{formatVND(stats.totalServicesRevenue)}</div>
+                            <div className="text-[9px] font-black text-rose-400 uppercase">TỔNG GIÁ VỐN</div>
+                            <div className="text-xl font-black text-rose-700">{formatVND(stats.totalCost)}</div>
                         </div>
                     </div>
                 </div>
             </div>
 
             <div className="bg-white p-8 rounded-[3rem] shadow-xl border border-gray-100 overflow-hidden">
-               <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-xl font-black text-gray-900 uppercase tracking-tighter flex items-center gap-3"><CreditCard className="w-7 h-7 text-emerald-600" /> GIAO DỊCH {statsPeriod === 'day' ? 'TRONG NGÀY' : statsPeriod === 'week' ? 'TRONG TUẦN' : 'TRONG THÁNG'}</h3>
-                  <div className="px-4 py-2 bg-gray-100 rounded-xl text-[10px] font-black text-gray-500 uppercase">{stats.filteredPaid.length} ĐƠN</div>
-               </div>
+               <h3 className="text-xl font-black text-gray-900 uppercase mb-8 flex items-center gap-3"><CreditCard className="w-7 h-7 text-emerald-600" /> LỊCH SỬ GIAO DỊCH</h3>
                <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
                  {stats.filteredPaid.length > 0 ? (
                     stats.filteredPaid.slice().reverse().map(b => (
-                        <div key={b.id} className="p-5 bg-gray-50 rounded-2xl flex justify-between items-center border border-gray-100 hover:bg-white transition-all group">
-                          <div className="flex items-center gap-4">
-                            <div className="bg-white p-3 rounded-xl text-emerald-600 shadow-sm group-hover:bg-emerald-600 group-hover:text-white transition-colors"><CheckCircle className="w-5 h-5" /></div>
-                            <div>
-                              <div className="font-black text-gray-900 uppercase text-sm tracking-tight">{b.customerName}</div>
-                              <div className="text-[9px] font-bold text-gray-400 uppercase">
-                                {new Date(b.date).toLocaleDateString('vi-VN')} • {b.courtId === 0 ? `Dịch vụ` : `Sân ${b.courtId}`} • {b.timeSlot}
-                              </div>
-                            </div>
+                        <div key={b.id} className="p-5 bg-gray-50 rounded-2xl flex justify-between items-center border border-gray-100">
+                          <div>
+                            <div className="font-black text-gray-900 uppercase text-sm">{b.customerName}</div>
+                            <div className="text-[9px] font-bold text-gray-400 uppercase">{b.date} • {b.courtId === 0 ? 'Dịch vụ' : `Sân ${b.courtId}`}</div>
                           </div>
                           <div className="text-right">
-                            <div className="text-lg font-black text-emerald-700 tracking-tighter">{formatVND(b.totalAmount)}</div>
-                            <div className="text-[8px] font-black text-gray-400 uppercase tracking-widest">
-                                LN: +{formatVND(b.totalAmount - (b.serviceItems || []).reduce((s, i) => s + (i.costPrice * i.quantity), 0))}
-                            </div>
+                            <div className="text-lg font-black text-emerald-700">{formatVND(b.totalAmount)}</div>
+                            <div className="text-[8px] font-black text-gray-400 uppercase">LN: +{formatVND(b.totalAmount - (b.serviceItems || []).reduce((s, i) => s + (i.costPrice * i.quantity), 0))}</div>
                           </div>
                         </div>
                     ))
-                 ) : (
-                    <div className="py-20 text-center flex flex-col items-center justify-center opacity-30 grayscale">
-                        <Filter className="w-12 h-12 mb-4" />
-                        <p className="font-black uppercase text-xs tracking-widest">Không có dữ liệu trong kỳ này</p>
-                    </div>
-                 )}
-               </div>
-            </div>
-
-            <div className="bg-white p-8 rounded-[3rem] shadow-xl border-4 border-emerald-50 overflow-hidden">
-               <div className="flex items-center justify-between mb-8">
-                  <h3 className="text-2xl font-black text-gray-900 uppercase flex items-center gap-4 tracking-tighter"><Cloud className="w-8 h-8 text-emerald-600" /> ĐỒNG BỘ CLOUD</h3>
-                  <button onClick={pullFromCloud} className="p-3 bg-emerald-50 text-emerald-600 rounded-xl active:scale-90 transition-all"><RefreshCw className={cn("w-5 h-5", syncStatus === 'syncing' && "animate-spin")} /></button>
-               </div>
-               <div className="space-y-6">
-                  <div className="p-5 bg-emerald-50/50 rounded-2xl border-2 border-emerald-100 flex flex-col md:flex-row gap-4 items-center">
-                    <div className="flex-1 w-full">
-                      <label className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em] ml-2">MÃ QUẢN LÝ CỬA HÀNG</label>
-                      <input type="text" value={syncId} onChange={(e) => setSyncId(e.target.value)} placeholder="Nhập mã cửa hàng..." className="w-full mt-2 px-5 py-3 bg-white border-2 border-transparent focus:border-emerald-500 outline-none rounded-xl font-black text-lg text-gray-900 shadow-sm" />
-                    </div>
-                  </div>
+                 ) : <div className="py-10 text-center opacity-30">Không có dữ liệu</div>}
                </div>
             </div>
           </div>
         )}
       </main>
 
-      {showIOSGuide && (
-        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex flex-col items-center justify-end p-10 text-white animate-in fade-in duration-300">
-           <div className="flex-1 flex flex-col items-center justify-center text-center space-y-6">
-             <div className="bg-white p-6 rounded-full text-blue-600 animate-float"><Apple className="w-16 h-16" /></div>
-             <h3 className="text-3xl font-black uppercase tracking-tight">CÀI ĐẶT TRÊN IPHONE</h3>
-             <div className="space-y-4 max-w-xs">
-                <div className="flex items-center gap-4 text-left bg-white/10 p-4 rounded-2xl">
-                   <div className="bg-blue-600 p-2 rounded-lg font-black">1</div>
-                   <p className="text-sm font-bold">Bấm vào biểu tượng <span className="inline-block bg-white/20 p-1 rounded"><Share className="w-4 h-4 inline" /> Chia sẻ</span> ở dưới trình duyệt.</p>
-                </div>
-                <div className="flex items-center gap-4 text-left bg-white/10 p-4 rounded-2xl">
-                   <div className="bg-blue-600 p-2 rounded-lg font-black">2</div>
-                   <p className="text-sm font-bold">Kéo xuống và chọn <span className="text-emerald-400 uppercase">Thêm vào MH chính</span></p>
-                </div>
-             </div>
-           </div>
-           <button onClick={() => setShowIOSGuide(false)} className="mb-12 px-10 py-4 bg-white text-black font-black rounded-2xl uppercase tracking-widest active:scale-95 transition-all">Đã hiểu</button>
-           <div className="animate-bounce mb-4 text-emerald-400"><MoveDown className="w-8 h-8" /></div>
-        </div>
-      )}
-
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-100 z-50 px-6 pt-5 flex justify-around items-center rounded-t-[2.5rem] shadow-[0_-15px_40px_rgba(0,0,0,0.06)] safe-pb">
         {[ { id: 'calendar', icon: CalendarIcon, label: 'Lịch' }, { id: 'shop', icon: ShoppingBag, label: 'Kho' }, { id: 'stats', icon: BarChart3, label: 'Admin' } ].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={cn("flex flex-col items-center gap-1.5 pb-4 px-6 transition-all duration-300", activeTab === tab.id ? "text-emerald-600 scale-110" : "text-gray-300")}>
+          <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={cn("flex flex-col items-center gap-1.5 pb-4 px-6 transition-all", activeTab === tab.id ? "text-emerald-600 scale-110" : "text-gray-300")}>
             <tab.icon className={cn("w-7 h-7", activeTab === tab.id ? "stroke-[3px]" : "stroke-2")} />
             <span className="text-[9px] font-black uppercase tracking-widest">{tab.label}</span>
           </button>
@@ -563,20 +525,20 @@ const App: React.FC = () => {
 
       {showQuickPlayMenu && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
-          <div className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in duration-200">
+          <div className="bg-white rounded-[2.5rem] w-full max-sm overflow-hidden shadow-2xl animate-in zoom-in duration-200">
             <div className="bg-emerald-900 p-7 text-white flex justify-between items-center">
-              <div><h3 className="text-xl font-black uppercase tracking-tight">VÀO SÂN</h3><p className="text-emerald-100/50 text-[9px] font-bold uppercase tracking-widest">Bắt đầu tính giờ</p></div>
+              <h3 className="text-xl font-black uppercase tracking-tight">VÀO SÂN NHANH</h3>
               <button onClick={() => setShowQuickPlayMenu(false)} className="p-2 bg-white/10 rounded-xl"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-6 space-y-3 bg-gray-50">
               {COURTS.map(court => (
-                <button key={court.id} onClick={() => handlePlayNow(court.id)} className="w-full p-5 bg-white border border-gray-100 rounded-2xl flex items-center justify-between hover:border-emerald-500 active:scale-95 transition-all">
-                  <div className="text-left font-black uppercase tracking-tight text-lg text-gray-900">{court.name}</div>
+                <button key={court.id} onClick={() => handlePlayNow(court.id)} className="w-full p-5 bg-white border border-gray-100 rounded-2xl flex items-center justify-between active:scale-95">
+                  <div className="font-black uppercase tracking-tight text-lg text-gray-900">{court.name}</div>
                   <div className="bg-emerald-50 p-2.5 rounded-xl text-emerald-600"><Play className="w-5 h-5 fill-current" /></div>
                 </button>
               ))}
               <button onClick={handleOpenShopOnly} className="w-full p-5 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between active:scale-95">
-                <div className="text-left font-black uppercase tracking-tight text-lg text-blue-900">BÁN LẺ DỊCH VỤ</div>
+                <div className="font-black uppercase tracking-tight text-lg text-blue-900">BÁN LẺ DỊCH VỤ</div>
                 <div className="bg-blue-600 p-2.5 rounded-xl text-white"><ShoppingBag className="w-5 h-5" /></div>
               </button>
             </div>

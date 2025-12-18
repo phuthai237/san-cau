@@ -1,20 +1,20 @@
 
-const CACHE_NAME = 'badminton-pro-v3';
-const ASSETS = [
+const CACHE_NAME = 'badminton-pro-v6';
+const ASSETS_TO_CACHE = [
   './',
   './index.html',
+  './manifest.json',
   'https://cdn.tailwindcss.com',
   'https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap'
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      // Sử dụng nỗ lực tốt nhất để cache
-      return Promise.allSettled(ASSETS.map(url => cache.add(url)));
+      return cache.addAll(ASSETS_TO_CACHE);
     })
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
@@ -29,15 +29,16 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Bỏ qua các request không phải GET
   if (event.request.method !== 'GET') return;
-  
-  // Bỏ qua các request từ extension hoặc domain lạ
-  if (!event.request.url.startsWith(self.location.origin) && !event.request.url.startsWith('https://')) return;
-
   event.respondWith(
-    fetch(event.request).catch(() => {
-      return caches.match(event.request);
+    caches.match(event.request).then((cached) => {
+      return cached || fetch(event.request).then((response) => {
+        if (response.status === 200) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+        }
+        return response;
+      }).catch(() => caches.match('./index.html'));
     })
   );
 });
