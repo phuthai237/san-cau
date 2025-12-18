@@ -41,32 +41,35 @@ const App: React.FC = () => {
   const [pendingBooking, setPendingBooking] = useState<{courtId: number, slot: TimeSlot} | null>(null);
   const [selectedBookingForDetail, setSelectedBookingForDetail] = useState<Booking | null>(null);
 
-  // PWA & Mobile States
+  // PWA States
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState(false);
 
   const isInitialMount = useRef(true);
 
   useEffect(() => {
-    // Check if app is already installed/running as standalone
-    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone) {
+    // Kiểm tra nếu app đang chạy ở chế độ cài đặt (Standalone)
+    if (window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone === true) {
       setIsStandalone(true);
     }
 
-    window.addEventListener('beforeinstallprompt', (e) => {
+    const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
-    });
+    };
+
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const handleInstallClick = async () => {
     if (isStandalone) {
-      alert("Ứng dụng đã được cài đặt thành công!");
+      alert("Ứng dụng đã được cài đặt!");
       return;
     }
 
     if (!deferredPrompt) {
-      alert("HƯỚNG DẪN CÀI ĐẶT:\n\n1. iPhone (Safari): Nhấn biểu tượng 'Chia sẻ' -> 'Thêm vào màn hình chính'.\n\n2. Android (Chrome): Nhấn dấu '3 chấm' -> 'Cài đặt ứng dụng'.");
+      alert("HƯỚNG DẪN CÀI ĐẶT:\n\n1. iPhone (Safari): Nhấn 'Chia sẻ' -> 'Thêm vào màn hình chính'.\n\n2. Android (Chrome): Nhấn '3 chấm' -> 'Cài đặt ứng dụng'.");
       return;
     }
     
@@ -101,7 +104,6 @@ const App: React.FC = () => {
       setSyncStatus('success');
       setLastSynced(Date.now());
     } catch (e) {
-      console.error("Sync error:", e);
       setSyncStatus('error');
     }
   }, [syncId]);
@@ -138,18 +140,10 @@ const App: React.FC = () => {
 
     const timer = setTimeout(() => {
         pushToCloud(bookings, products);
-    }, 1000);
+    }, 1500);
 
     return () => clearTimeout(timer);
-  }, [bookings, products, syncId]);
-
-  useEffect(() => {
-    if (!syncId) return;
-    const interval = setInterval(() => {
-      pullFromCloud();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [syncId, pullFromCloud]);
+  }, [bookings, products, syncId, pullFromCloud, pushToCloud]);
 
   const dateKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
 
@@ -438,9 +432,8 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'stats' && (activeTab === 'stats' && (
+        {activeTab === 'stats' && (
           <div className="space-y-8 animate-in slide-in-from-bottom duration-300">
-            {/* Native App Status Card */}
             <div className={cn(
               "p-8 rounded-[3rem] text-white shadow-2xl relative overflow-hidden transition-all duration-500",
               isStandalone ? "bg-emerald-600" : "bg-blue-600"
@@ -453,7 +446,7 @@ const App: React.FC = () => {
                     <h3 className="text-2xl md:text-3xl font-black uppercase tracking-tight mb-2">
                       {isStandalone ? "CHẾ ĐỘ NATIVE APP" : "CÀI ĐẶT ỨNG DỤNG MOBILE"}
                     </h3>
-                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest opacity-80 leading-relaxed">
+                    <p className="text-white/80 font-bold text-xs uppercase tracking-widest leading-relaxed">
                       {isStandalone 
                         ? "Ứng dụng đang chạy mượt mà ở chế độ toàn màn hình như ứng dụng chuyên nghiệp." 
                         : "Đưa ứng dụng ra màn hình chính để sử dụng toàn màn hình và mượt mà hơn như app thật."}
@@ -535,7 +528,7 @@ const App: React.FC = () => {
                </div>
             </div>
           </div>
-        ))}
+        )}
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-100 z-50 px-6 pt-5 flex justify-around items-center rounded-t-[2.5rem] shadow-[0_-15px_40px_rgba(0,0,0,0.06)] safe-pb">
@@ -551,7 +544,6 @@ const App: React.FC = () => {
         ))}
       </nav>
 
-      {/* Các Modals giữ nguyên... */}
       {showQuickPlayMenu && (
         <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex items-center justify-center p-6">
           <div className="bg-white rounded-[2.5rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in duration-200">
