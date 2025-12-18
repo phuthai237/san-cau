@@ -10,7 +10,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Badminton Pro" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="theme-color" content="#065f46" />
+    <meta name="theme-color" content="#064e3b" />
+    <meta name="format-detection" content="telephone=no" />
     
     <!-- Icons -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
@@ -28,19 +29,26 @@
 
       body {
         font-family: 'Inter', sans-serif;
-        overscroll-behavior-y: none; /* Ngăn pull-to-refresh */
+        overscroll-behavior-y: none;
         -webkit-tap-highlight-color: transparent;
         background-color: #f9fafb;
-        /* Ngăn chặn zoom khi gõ phím trên iOS */
-        touch-action: pan-x pan-y;
+        touch-action: manipulation; /* Ngăn chặn double-tap zoom, giúp click nhanh hơn */
       }
 
-      /* Tối ưu hóa cho cảm giác Native App */
-      button, a {
+      /* Native feeling for iOS */
+      @supports (padding: env(safe-area-inset-top)) {
+        .safe-pt { padding-top: var(--safe-top); }
+        .safe-pb { padding-bottom: var(--safe-bottom); }
+      }
+
+      button {
+        cursor: pointer;
         user-select: none;
         -webkit-user-select: none;
+        touch-action: manipulation;
       }
 
+      /* Tối ưu scroll */
       .custom-scrollbar::-webkit-scrollbar {
         width: 4px;
       }
@@ -48,8 +56,14 @@
         background: transparent;
       }
       .custom-scrollbar::-webkit-scrollbar-thumb {
-        background: #e5e7eb;
+        background: #d1d5db;
         border-radius: 10px;
+      }
+      
+      /* Loại bỏ hiệu ứng bóng đổ mặc định của input trên iOS */
+      input {
+        -webkit-appearance: none;
+        border-radius: 0;
       }
     </style>
     <script type="importmap">
@@ -68,10 +82,11 @@
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
     <script>
-      // Đăng ký Service Worker tối giản để hỗ trợ cài đặt PWA
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').catch(() => {});
+          navigator.serviceWorker.register('sw.js')
+            .then(reg => console.log('SW Registered'))
+            .catch(err => console.log('SW Registration Failed', err));
         });
       }
     </script>
