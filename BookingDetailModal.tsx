@@ -1,411 +1,103 @@
-
-// Fix: Added useMemo and Copy to imports to resolve undefined variable errors
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { X, User, Phone, ShoppingBag, Plus, Minus, Trash2, CheckCircle, Info, Play, Timer, ChevronRight, Loader2, AlertTriangle, QrCode, Download, ExternalLink, Landmark, Zap, Search, Copy, Settings } from 'lucide-react';
-import { Booking, Product, SaleItem, BankConfig } from './types';
+import { X, Plus, Minus, Trash2, CheckCircle, Info, Timer, Loader2, AlertTriangle, QrCode, Landmark, Search, Copy, RefreshCw } from 'lucide-react';
+import { Booking, Product, BankConfig } from './types';
 import { formatVND, cn } from './utils';
 
-interface BookingDetailModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  booking: Booking | null;
-  products: Product[];
-  bankConfig: BankConfig;
-  onUpdateBooking: (updatedBooking: Booking) => void;
-  onCheckout: (booking: Booking, finalDuration: number) => void;
-}
+const BINS: any = { vcb:'970436', mbb:'970422', tcb:'970407', bidv:'970418', ctg:'970415', acb:'970416', tpb:'970423', vpb:'970432', agribank:'970405' };
+const clean = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^a-zA-Z0-9 ]/g, '').toUpperCase();
 
-const PRICE_PER_HOUR = 60000;
-
-export const BookingDetailModal: React.FC<BookingDetailModalProps> = ({
-  isOpen,
-  onClose,
-  booking,
-  products,
-  bankConfig,
-  onUpdateBooking,
-  onCheckout
-}) => {
-  const [tempDurationSlots, setTempDurationSlots] = useState(0);
+export const BookingDetailModal: React.FC<{isOpen:boolean, onClose:()=>void, booking:Booking|null, products:Product[], bankConfig:BankConfig, onUpdateBooking:(u:Booking)=>void, onCheckout:(b:Booking, d:number)=>void}> = 
+({ isOpen, onClose, booking, products, bankConfig, onUpdateBooking, onCheckout }) => {
+  const [slots, setSlots] = useState(0);
   const [now, setNow] = useState(new Date());
-  const [confirming, setConfirming] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const [showQR, setShowQR] = useState(false);
-  const [isCheckingPayment, setIsCheckingPayment] = useState(false);
-  const [paymentFound, setPaymentFound] = useState(false);
-  
-  const pollTimerRef = useRef<any>(null);
+  const [st, setSt] = useState({ conf:false, proc:false, qr:false, found:false, img:'loading', v:0 });
+  const poll = useRef<any>(null);
 
-  useEffect(() => {
-    if (booking) {
-      setTempDurationSlots(booking.durationSlots || 0);
-      setConfirming(false);
-      setProcessing(false);
-      setShowQR(false);
-      setPaymentFound(false);
-    }
-  }, [booking?.id, isOpen]);
+  useEffect(() => { if (booking && isOpen) { setSlots(booking.durationSlots); setSt(s => ({ ...s, conf:false, proc:false, qr:false, found:false, img:'loading' })); } }, [booking?.id, isOpen]);
+  useEffect(() => { let t = setInterval(() => setNow(new Date()), 3000); return () => clearInterval(t); }, []);
 
-  useEffect(() => {
-    let interval: any;
-    if (isOpen && booking?.isLive) {
-      interval = setInterval(() => setNow(new Date()), 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isOpen, booking?.isLive]);
-
-  // Memoized transaction memo
-  const paymentMemo = useMemo(() => {
-    if (!booking) return '';
-    return `BDP${booking.id.slice(-6).toUpperCase()}`;
-  }, [booking?.id]);
-
-  const serviceTotal = (booking?.serviceItems || []).reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  
-  const currentCourtTotal = useMemo(() => {
+  const memo = useMemo(() => booking ? `BDP${booking.id.slice(-6).toUpperCase()}` : "", [booking]);
+  const sTot = useMemo(() => (booking?.serviceItems || []).reduce((a, b) => a + (b.price * b.quantity), 0), [booking]);
+  const cTot = useMemo(() => {
     if (!booking) return 0;
-    if (booking.isLive && booking.actualStartTime) {
-        const start = new Date(booking.actualStartTime);
-        const diffMs = now.getTime() - start.getTime();
-        const liveHrs = diffMs / (1000 * 60 * 60);
-        const slotsUsed = Math.max(1, Math.ceil(liveHrs * 2));
-        return slotsUsed * (PRICE_PER_HOUR / 2);
-    }
-    return booking.courtId === 0 ? 0 : tempDurationSlots * (PRICE_PER_HOUR / 2);
-  }, [booking, tempDurationSlots, now]);
+    if (booking.isLive && booking.actualStartTime) return Math.max(1, Math.ceil(((now.getTime() - new Date(booking.actualStartTime).getTime()) / 3600000) * 2)) * 30000;
+    return booking.courtId === 0 ? 0 : slots * 30000;
+  }, [booking, slots, now]);
 
-  const finalPayable = Math.max(0, (currentCourtTotal + serviceTotal) - (booking?.deposit || 0));
+  const pay = Math.max(0, (cTot + sTot) - (Number(booking?.deposit) || 0));
+  const qrUrl = useMemo(() => {
+    if (!st.qr || !bankConfig.accountNo) return "";
+    const b = BINS[bankConfig.bankId] || bankConfig.bankId;
+    const a = bankConfig.accountNo.replace(/\s+/g, '');
+    const n = encodeURIComponent(clean(bankConfig.accountName));
+    return `https://img.vietqr.io/image/${b}-${a}-compact2.png?amount=${Math.round(pay)}&addInfo=${memo}&accountName=${n}&v=${st.v}`;
+  }, [st.qr, st.v, bankConfig, pay, memo]);
 
-  // Polling logic for Casso/SePay
-  const checkTransactions = useCallback(async () => {
-    if (!bankConfig.apiKey || bankConfig.apiService === 'none' || paymentFound || !showQR) return;
-
-    setIsCheckingPayment(true);
+  const check = useCallback(async () => {
+    if (!bankConfig.apiKey || st.found || !st.qr) return;
     try {
-      let found = false;
-      if (bankConfig.apiService === 'casso') {
-        const response = await fetch('https://api.casso.vn/v2/transactions?pageSize=10', {
-          headers: { 'Authorization': `Apikey ${bankConfig.apiKey}` }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          found = data.data?.records?.some((t: any) => 
-            t.description.toUpperCase().includes(paymentMemo) && 
-            t.amount >= finalPayable
-          );
-        }
-      } else if (bankConfig.apiService === 'sepay') {
-        const response = await fetch(`https://my.sepay.vn/api/transactions/list?account_number=${bankConfig.accountNo}&limit=10`, {
-          headers: { 'Authorization': `Bearer ${bankConfig.apiKey}` }
-        });
-        if (response.ok) {
-          const data = await response.json();
-          found = data.items?.some((t: any) => 
-            t.content.toUpperCase().includes(paymentMemo) && 
-            parseFloat(t.amount) >= finalPayable
-          );
+      const isC = bankConfig.apiService === 'casso';
+      const r = await fetch(isC ? 'https://api.casso.vn/v2/transactions?pageSize=10' : `https://my.sepay.vn/api/transactions/list?account_number=${bankConfig.accountNo.replace(/\s+/g,'')}&limit=10`, 
+      { headers: { 'Authorization': (isC ? 'Apikey ' : 'Bearer ') + bankConfig.apiKey } });
+      if (r.ok) {
+        const d = await r.json();
+        const txs = isC ? d.data?.records : d.items;
+        if (txs?.some((t: any) => (t.description || t.content || "").toUpperCase().includes(memo) && Number(t.amount) >= Math.round(pay))) {
+          setSt(s => ({...s, found:true})); setTimeout(() => onCheckout(booking!, slots), 1500);
         }
       }
+    } catch (e) {}
+  }, [bankConfig, memo, pay, st.found, st.qr, booking, slots, onCheckout]);
 
-      if (found) {
-        setPaymentFound(true);
-        setTimeout(() => {
-          onCheckout(booking!, tempDurationSlots);
-          setShowQR(false);
-        }, 1500);
-      }
-    } catch (e) {
-      console.error('Lỗi check giao dịch:', e);
-    } finally {
-      setIsCheckingPayment(false);
-    }
-  }, [bankConfig, paymentMemo, finalPayable, paymentFound, showQR, booking, tempDurationSlots, onCheckout]);
-
-  useEffect(() => {
-    if (showQR && bankConfig.apiKey && bankConfig.apiService !== 'none' && !paymentFound) {
-      pollTimerRef.current = setInterval(checkTransactions, 5000); // Check every 5s
-    } else {
-      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-    }
-    return () => { if (pollTimerRef.current) clearInterval(pollTimerRef.current); };
-  }, [showQR, bankConfig.apiKey, bankConfig.apiService, checkTransactions, paymentFound]);
+  useEffect(() => { if (st.qr && bankConfig.apiKey && !st.found) poll.current = setInterval(check, 8000); return () => clearInterval(poll.current); }, [st.qr, st.found, check]);
 
   if (!isOpen || !booking) return null;
 
-  const isShopOnly = booking.courtId === 0;
-  const isLive = booking.isLive;
-
-  const handleAddProduct = (product: Product) => {
-    const items = [...(booking.serviceItems || [])];
-    const existingIndex = items.findIndex(i => i.productId === product.id);
-    if (existingIndex > -1) {
-      items[existingIndex].quantity += 1;
-    } else {
-      items.push({ 
-        productId: product.id, 
-        productName: product.name, 
-        quantity: 1, 
-        price: product.price,
-        costPrice: product.costPrice || 0
-      });
-    }
-    updateTotals(items, tempDurationSlots);
-  };
-
-  const handleRemoveProduct = (productId: string) => {
-    const items = (booking.serviceItems || []).filter(i => i.productId !== productId);
-    updateTotals(items, tempDurationSlots);
-  };
-
-  const updateTotals = (items: SaleItem[], duration: number) => {
-    const sTotal = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-    let cTotal = isLive ? currentCourtTotal : (isShopOnly ? 0 : duration * (PRICE_PER_HOUR / 2));
-    
-    onUpdateBooking({
-      ...booking,
-      serviceItems: items,
-      durationSlots: duration,
-      totalAmount: cTotal + sTotal,
-      remainingAmount: (cTotal + sTotal) - booking.deposit
-    });
-  };
-
-  const adjustDuration = (delta: number) => {
-    if (isShopOnly || isLive) return;
-    const newDuration = Math.max(1, tempDurationSlots + delta);
-    setTempDurationSlots(newDuration);
-    updateTotals(booking.serviceItems || [], newDuration);
-  };
-
-  const handleFinalPay = (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (!confirming) {
-      setConfirming(true);
-      setTimeout(() => setConfirming(false), 5000);
-      return;
-    }
-    setProcessing(true);
-    setTimeout(() => { onCheckout(booking, tempDurationSlots); }, 100);
-  };
-
-  const handleQRClick = () => {
-    if (!bankConfig.accountNo) {
-      alert("CHƯA CẤU HÌNH NGÂN HÀNG!\nVui lòng vào tab Admin để nhập Số tài khoản trước khi dùng QR.");
-      return;
-    }
-    setShowQR(true);
-  };
-
-  const getQRUrl = () => {
-    if (!bankConfig.accountNo) return '';
-    return `https://img.vietqr.io/image/${bankConfig.bankId}-${bankConfig.accountNo}-compact.png?amount=${finalPayable}&addInfo=${encodeURIComponent(paymentMemo)}&accountName=${encodeURIComponent(bankConfig.accountName)}`;
-  };
-
   return (
-    <div className="fixed inset-0 z-[99999] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm pointer-events-auto">
-      <div className="bg-white rounded-t-[2.5rem] md:rounded-[3rem] shadow-2xl w-full max-w-5xl h-[95dvh] md:h-auto md:max-h-[92dvh] flex flex-col overflow-hidden border-t-8 border-emerald-900 animate-in slide-in-from-bottom duration-300">
-        
-        {/* Modal Header */}
-        <div className="bg-emerald-900 px-6 py-5 md:px-10 md:py-6 flex items-center justify-between shrink-0 shadow-lg relative z-10" style={{ paddingTop: 'calc(1.25rem + env(safe-area-inset-top))' }}>
-          <div className="flex items-center gap-4">
-            {isLive ? <Timer className="w-8 h-8 md:w-10 md:h-10 text-emerald-400 animate-pulse" /> : <Info className="w-8 h-8 md:w-10 md:h-10 text-white" />} 
-            <div className="leading-tight">
-              <h3 className="text-white text-xl md:text-2xl font-black uppercase tracking-tight">
-                {isLive ? 'ĐANG TÍNH GIỜ' : (isShopOnly ? 'HÓA ĐƠN LẺ' : 'CHI TIẾT ĐƠN')}
-              </h3>
-              <p className="text-emerald-100/50 text-[10px] font-bold uppercase tracking-widest mt-0.5">
-                {isShopOnly ? 'Khách dịch vụ' : `Sân ${booking.courtId} | ${booking.timeSlot}`}
-              </p>
-            </div>
-          </div>
-          <button onClick={onClose} className="text-white/40 p-3 bg-white/10 rounded-2xl hover:bg-white/20 transition-all active:scale-90">
-            <X className="w-7 h-7" />
-          </button>
+    <div className="fixed inset-0 z-[9999] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm p-0">
+      <div className="bg-white rounded-t-[2rem] md:rounded-[2rem] w-full max-w-4xl max-h-[95vh] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom">
+        <div className="bg-emerald-900 p-5 flex items-center justify-between text-white">
+          <div className="flex items-center gap-3">{booking.isLive ? <Timer className="animate-pulse text-emerald-400" /> : <Info />}<div><h3 className="font-black uppercase">{booking.isLive ? 'Tính giờ' : 'Chi tiết'}</h3><p className="text-[10px] opacity-50 uppercase">{booking.courtId === 0 ? 'Khách lẻ' : `Sân ${booking.courtId}`}</p></div></div>
+          <button onClick={onClose} className="p-2 bg-white/10 rounded-xl"><X /></button>
         </div>
-
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto p-6 md:p-10 bg-gray-50 flex flex-col gap-6 custom-scrollbar pb-48 md:pb-10">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="space-y-6">
-              <section className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">KHÁCH HÀNG</p>
-                  <div className="text-lg font-black text-gray-900 truncate uppercase">{booking.customerName}</div>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">SỐ ĐIỆN THOẠI</p>
-                  <div className="text-lg font-black text-gray-900">{booking.phoneNumber}</div>
-                </div>
-              </section>
-
-              {isLive ? (
-                <section className="bg-blue-600 p-8 rounded-[2.5rem] text-white shadow-xl text-center">
-                  <p className="text-[10px] font-black uppercase text-blue-100 mb-4 tracking-[0.2em]">THỜI GIAN THỰC TẾ</p>
-                  <div className="text-5xl md:text-6xl font-black tabular-nums tracking-tighter">
-                    {Math.floor(currentCourtTotal / (PRICE_PER_HOUR / 2) / 2).toString().padStart(2, '0')}:
-                    {Math.floor(((currentCourtTotal / (PRICE_PER_HOUR / 2) / 2) % 1) * 60).toString().padStart(2, '0')}
-                  </div>
-                  <div className="mt-6 pt-6 border-t border-white/20 flex justify-between items-center px-4">
-                    <span className="text-[10px] font-black uppercase text-blue-200">Tiền sân tạm tính</span>
-                    <span className="text-2xl font-black">{formatVND(currentCourtTotal)}</span>
-                  </div>
-                </section>
-              ) : !isShopOnly && (
-                <section className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 flex items-center justify-between">
-                  <button onClick={() => adjustDuration(-1)} className="w-14 h-14 bg-gray-100 text-gray-400 rounded-2xl flex items-center justify-center active:scale-90 transition-all"><Minus className="w-7 h-7 stroke-[3px]" /></button>
-                  <div className="text-center">
-                    <div className="text-4xl font-black text-emerald-950 leading-none">{tempDurationSlots / 2} <span className="text-base uppercase">Giờ</span></div>
-                    <p className="text-[10px] text-emerald-600 font-black mt-2 uppercase tracking-widest">{tempDurationSlots} Slot</p>
-                  </div>
-                  <button onClick={() => adjustDuration(1)} className="w-14 h-14 bg-emerald-600 text-white rounded-2xl flex items-center justify-center active:scale-90 transition-all shadow-lg"><Plus className="w-7 h-7 stroke-[3px]" /></button>
-                </section>
-              )}
+        <div className="flex-1 overflow-y-auto p-6 bg-gray-50 flex flex-col gap-6 pb-40 md:pb-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="space-y-4">
+              <div className="bg-white p-5 rounded-3xl border flex justify-between uppercase text-[10px] font-black"><div><p className="text-gray-400 mb-1">Khách</p><p className="text-xs">{booking.customerName}</p></div><div className="text-right"><p className="text-gray-400 mb-1">SĐT</p><p className="text-xs">{booking.phoneNumber}</p></div></div>
+              {booking.isLive ? <div className="bg-blue-600 p-8 rounded-[2rem] text-white text-center shadow-lg"><p className="text-[10px] font-black uppercase mb-2 opacity-70">Thời gian</p><div className="text-5xl font-black">{Math.floor(cTot/60000).toString().padStart(2,'0')}:{Math.floor((cTot%60000)/1000).toString().padStart(2,'0')}</div></div> : !booking.courtId && <div className="bg-white p-6 rounded-[2rem] border flex items-center justify-between"><button onClick={() => setSlots(s => Math.max(1, s - 1))} className="w-12 h-12 bg-gray-100 rounded-xl"><Minus className="mx-auto"/></button><div className="text-center"><p className="text-3xl font-black">{slots/2}h</p></div><button onClick={() => setSlots(s => s + 1)} className="w-12 h-12 bg-emerald-600 text-white rounded-xl"><Plus className="mx-auto"/></button></div>}
             </div>
-
-            <div className="space-y-6">
-              <section className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
-                <h4 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-widest flex items-center gap-2"><ShoppingBag className="w-4 h-4" /> THÊM DỊCH VỤ</h4>
-                <div className="grid grid-cols-2 gap-2 max-h-[160px] overflow-y-auto pr-1 custom-scrollbar">
-                  {products.map(p => (
-                    <button key={p.id} onClick={() => handleAddProduct(p)} className="p-3 bg-gray-50 border border-transparent rounded-xl text-left hover:border-emerald-500 hover:bg-white active:scale-95 transition-all group">
-                      <div className="font-black text-gray-900 text-xs truncate uppercase group-hover:text-emerald-700">{p.name}</div>
-                      <div className="text-[10px] font-black text-emerald-600">{formatVND(p.price)}</div>
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100 flex-1 flex flex-col min-h-[180px]">
-                <h4 className="text-[10px] font-black text-gray-900 uppercase mb-4 tracking-widest">ĐÃ CHỌN ({booking.serviceItems?.length || 0})</h4>
-                <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                  {booking.serviceItems?.map(item => (
-                    <div key={item.productId} className="flex items-center justify-between bg-emerald-50/50 p-3 rounded-xl border border-emerald-100/50">
-                      <div className="flex-1 min-w-0">
-                        <div className="font-black text-emerald-950 text-[11px] truncate uppercase">{item.productName}</div>
-                        <div className="text-[10px] text-emerald-600 font-bold uppercase">{item.quantity} x {formatVND(item.price)}</div>
-                      </div>
-                      <button onClick={() => handleRemoveProduct(item.productId)} className="p-2 text-rose-500 hover:bg-rose-100 rounded-lg active:scale-90"><Trash2 className="w-5 h-5" /></button>
-                    </div>
-                  ))}
-                </div>
-              </section>
+            <div className="space-y-4">
+              <div className="bg-white p-5 rounded-3xl border min-h-[150px] flex flex-col">
+                <p className="text-[9px] font-black text-gray-400 uppercase mb-3">Dịch vụ</p>
+                <div className="flex-1 space-y-2 overflow-y-auto pr-1">{booking.serviceItems?.map((it, i) => (<div key={i} className="flex justify-between items-center bg-gray-50 p-2 rounded-xl text-[10px] font-bold uppercase"><span>{it.productName}</span><div className="flex gap-2 items-center"><span className="text-emerald-600">x{it.quantity}</span><button onClick={() => onUpdateBooking({...booking, serviceItems: booking.serviceItems?.filter(x => x.productId !== it.productId)})} className="text-rose-500"><Trash2 className="w-4 h-4" /></button></div></div>))}</div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">{products.slice(0,4).map(p => (<button key={p.id} onClick={() => { const items = [...(booking.serviceItems || [])]; const idx = items.findIndex(i => i.productId === p.id); if (idx > -1) items[idx].quantity++; else items.push({ ...p, productId: p.id, productName: p.name, quantity: 1 }); onUpdateBooking({...booking, serviceItems: items}); }} className="p-3 bg-white border rounded-2xl text-[9px] font-black uppercase">+{p.name}</button>))}</div>
             </div>
           </div>
         </div>
-
-        {/* Bottom Bar */}
-        <div className="shrink-0 bg-white border-t border-gray-200 p-6 md:p-8 flex flex-col gap-6 shadow-[0_-15px_30px_rgba(0,0,0,0.08)] relative z-20" style={{ paddingBottom: 'calc(1.5rem + env(safe-area-inset-bottom))' }}>
-          <div className="bg-emerald-950 rounded-[2rem] p-6 text-white flex items-center justify-between shadow-2xl border-t border-white/10">
-             <div className="space-y-1">
-                <div className="text-[9px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-2">
-                   <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></div> CẦN THANH TOÁN
-                </div>
-                <div className="text-3xl md:text-5xl font-black text-white tracking-tighter tabular-nums leading-none">
-                  {formatVND(finalPayable)}
-                </div>
-             </div>
-             <div className="text-right hidden sm:block">
-                <div className="text-[9px] font-black text-gray-500 uppercase">TIỀN SÂN: {formatVND(currentCourtTotal)}</div>
-                <div className="text-[9px] font-black text-gray-500 uppercase">DỊCH VỤ: {formatVND(serviceTotal)}</div>
-                {booking.deposit > 0 && <div className="text-[9px] font-black text-rose-500 uppercase">ĐÃ CỌC: -{formatVND(booking.deposit)}</div>}
-             </div>
-          </div>
-
-          <div className="flex gap-4">
-            <button onClick={onClose} className="px-4 py-5 bg-gray-100 text-gray-500 text-[10px] font-black rounded-2xl uppercase tracking-widest active:scale-95 transition-all">Hủy</button>
-            
-            <button 
-              onClick={handleQRClick}
-              className={cn(
-                "flex-1 py-5 rounded-2xl font-black uppercase tracking-tight flex items-center justify-center gap-2 active:scale-95 transition-all shadow-xl",
-                bankConfig.accountNo ? "bg-emerald-100 text-emerald-700 border-2 border-emerald-200" : "bg-gray-100 text-gray-400 border-2 border-dashed border-gray-300"
-              )}
-            >
-              <QrCode className="w-6 h-6" />
-              <span className="hidden sm:inline">QUÉT MÃ QR</span>
-              <span className="sm:hidden">QR</span>
-            </button>
-
-            <button 
-              disabled={processing}
-              onClick={handleFinalPay}
-              className={cn(
-                "flex-[1.5] py-5 text-white text-base md:text-xl font-black rounded-2xl shadow-2xl uppercase tracking-tight flex items-center justify-center gap-3 active:scale-95 transition-all relative overflow-hidden",
-                processing ? "bg-emerald-900" : confirming ? "bg-amber-500 scale-105" : "bg-emerald-600 shadow-emerald-200"
-              )}
-            >
-              {processing ? <Loader2 className="w-8 h-8 animate-spin" /> : confirming ? "BẤM LẠI ĐỂ CHỐT!" : <><CheckCircle className="w-6 h-6 stroke-[3px]" /> <span className="hidden sm:inline">TIỀN MẶT</span><span className="sm:hidden">XONG</span></>}
-            </button>
+        <div className="p-6 bg-white border-t space-y-4 shadow-2xl">
+          <div className="bg-emerald-950 p-6 rounded-[2rem] text-white flex justify-between items-center"><div><p className="text-[9px] font-black text-emerald-400 uppercase mb-1">Cần trả</p><p className="text-4xl font-black">{formatVND(pay)}</p></div><div className="text-right text-[8px] opacity-40 font-bold leading-none"><p>SÂN: {formatVND(cTot)}</p><p className="my-1">HÀNG: {formatVND(sTot)}</p>{Number(booking.deposit) > 0 && <p className="text-rose-400">CỌC: -{formatVND(booking.deposit)}</p>}</div></div>
+          <div className="flex gap-3"><button onClick={() => setSt(s => ({...s, qr:true, img:'loading', v:Date.now()}))} className="flex-1 py-5 bg-emerald-50 text-emerald-700 rounded-[1.5rem] font-black uppercase text-xs flex items-center justify-center gap-2"><QrCode className="w-5 h-5" /> Mã QR</button>
+            <button disabled={st.proc} onClick={() => { if(!st.conf) { setSt(s=>({...s, conf:true})); setTimeout(()=>setSt(s=>({...s, conf:false})), 3000); } else { setSt(s=>({...s, proc:true})); onCheckout(booking, slots); } }} className={cn("flex-[2] py-5 text-white rounded-[1.5rem] font-black uppercase transition-all", st.conf ? "bg-amber-500" : "bg-emerald-600")}>{st.conf ? "Bấm lại để chốt" : "Tiền mặt"}</button>
           </div>
         </div>
-
-        {/* Fullscreen QR Modal with Auto Polling */}
-        {showQR && (
-          <div className="fixed inset-0 z-[100000] bg-black/95 backdrop-blur-xl flex items-center justify-center p-6 animate-in fade-in duration-300">
-            <div className="bg-white w-full max-w-sm rounded-[3rem] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300">
-                <div className={cn("p-6 text-center text-white relative transition-colors duration-500", paymentFound ? "bg-emerald-500" : "bg-emerald-600")}>
-                   <button onClick={() => setShowQR(false)} className="absolute top-4 right-4 p-2 bg-white/10 rounded-full"><X className="w-6 h-6" /></button>
-                   <Landmark className="w-10 h-10 mx-auto mb-2 opacity-60" />
-                   <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-1">
-                     {paymentFound ? 'THANH TOÁN THÀNH CÔNG!' : 'MÃ CHUYỂN KHOẢN'}
-                   </p>
-                   <p className="text-3xl font-black">{formatVND(finalPayable)}</p>
+        {st.qr && (
+          <div className="fixed inset-0 z-[10000] bg-black/95 flex items-center justify-center p-6 animate-in fade-in">
+            <div className="bg-white w-full max-w-sm rounded-[3rem] overflow-hidden">
+              <div className={cn("p-6 text-center text-white relative", st.found ? "bg-emerald-500" : "bg-emerald-700")}><button onClick={() => setSt(s=>({...s, qr:false}))} className="absolute top-4 right-4 p-2 bg-white/20 rounded-full"><X className="w-4 h-4" /></button><Landmark className="w-8 h-8 mx-auto mb-2 opacity-50" /><p className="text-2xl font-black">{formatVND(pay)}</p><p className="text-[10px] font-bold opacity-60 uppercase">{bankConfig.accountName}</p></div>
+              <div className="p-8 space-y-6 text-center">
+                <div className="bg-gray-50 aspect-square rounded-3xl border-2 border-dashed border-gray-200 flex items-center justify-center relative min-h-[250px]">
+                  {st.found ? <div className="text-emerald-500"><CheckCircle className="w-16 h-16 mx-auto mb-2" /><p className="font-black uppercase">Đã nhận tiền</p></div> : (
+                    <>
+                      {st.img === 'loading' && <Loader2 className="w-10 h-10 animate-spin text-emerald-600" />}
+                      {st.img === 'error' && <div className="p-4"><AlertTriangle className="text-rose-500 mx-auto mb-2" /><p className="text-xs font-bold">Lỗi tải QR</p><button onClick={() => setSt(s=>({...s, v:Date.now()}))} className="mt-2 text-emerald-600"><RefreshCw className="w-4 h-4 mx-auto" /></button></div>}
+                      <img src={qrUrl} className={cn("w-full p-4", st.img === 'loaded' ? 'block' : 'hidden')} onLoad={() => setSt(s=>({...s, img:'loaded'}))} onError={() => setSt(s=>({...s, img:'error'}))} />
+                    </>
+                  )}
                 </div>
-                
-                <div className="p-8 space-y-6 text-center">
-                    <div className="bg-gray-50 p-4 rounded-3xl border-2 border-dashed border-gray-200 relative group overflow-hidden">
-                        {paymentFound ? (
-                          <div className="w-full aspect-square flex flex-col items-center justify-center animate-in zoom-in duration-500">
-                            <div className="w-32 h-32 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-4">
-                               <CheckCircle className="w-20 h-20 stroke-[3px]" />
-                            </div>
-                            <p className="font-black text-emerald-600 uppercase">Đã nhận được tiền</p>
-                            <p className="text-[10px] text-gray-400 font-bold uppercase mt-1">Đang hoàn tất...</p>
-                          </div>
-                        ) : (
-                          <>
-                            <img src={getQRUrl()} alt="VietQR" className="w-full h-auto rounded-xl shadow-lg" />
-                            {isCheckingPayment && (
-                              <div className="absolute top-4 right-4 bg-white/90 p-2 rounded-full shadow-md flex items-center gap-2">
-                                <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
-                                <span className="text-[8px] font-black text-emerald-900 uppercase">Đang chờ tiền...</span>
-                              </div>
-                            )}
-                          </>
-                        )}
-                    </div>
-                    
-                    {!paymentFound && (
-                      <>
-                        <div>
-                            <p className="text-xl font-black text-gray-900 uppercase tracking-tight">{bankConfig.accountName}</p>
-                            <p className="text-sm font-bold text-emerald-600 uppercase tracking-widest">{bankConfig.accountNo} • {bankConfig.bankId.toUpperCase()}</p>
-                        </div>
-
-                        <div className="bg-emerald-50 p-4 rounded-2xl relative">
-                            <p className="text-[10px] font-black text-emerald-400 uppercase tracking-widest mb-1 text-left">NỘI DUNG (QUAN TRỌNG)</p>
-                            <div className="flex items-center justify-between">
-                              <p className="text-lg font-black text-emerald-900 text-left">{paymentMemo}</p>
-                              <button onClick={() => { navigator.clipboard.writeText(paymentMemo); alert("Đã copy nội dung!"); }} className="p-2 bg-emerald-600 text-white rounded-lg active:scale-90"><Copy className="w-4 h-4" /></button>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-col gap-3">
-                          {bankConfig.apiKey && (
-                             <button 
-                               onClick={checkTransactions}
-                               disabled={isCheckingPayment}
-                               className="w-full py-3 bg-emerald-100 text-emerald-700 rounded-2xl font-black text-xs uppercase flex items-center justify-center gap-2 active:scale-95 transition-all"
-                             >
-                               <Search className={cn("w-4 h-4", isCheckingPayment && "animate-spin")} /> 
-                               Kiểm tra giao dịch
-                             </button>
-                          )}
-                          <button onClick={() => setShowQR(false)} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black uppercase shadow-xl active:scale-95">ĐÓNG</button>
-                        </div>
-                      </>
-                    )}
-                </div>
+                <div className="bg-emerald-50 p-4 rounded-2xl flex justify-between items-center text-left"><div><p className="text-[9px] font-black text-emerald-400 uppercase">Nội dung</p><p className="font-black">{memo}</p></div><button onClick={() => { navigator.clipboard.writeText(memo); alert("OK!"); }} className="p-2 bg-emerald-600 text-white rounded-lg"><Copy className="w-4 h-4" /></button></div>
+                <button onClick={() => setSt(s=>({...s, qr:false}))} className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black uppercase text-xs">Đóng</button>
+              </div>
             </div>
           </div>
         )}

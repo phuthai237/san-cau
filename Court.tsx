@@ -42,12 +42,12 @@ export const Court: React.FC<CourtProps> = ({ court, bookings, timeSlots, onSlot
               <div
                 key={slot.time}
                 className={cn(
-                  "relative group w-full p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col items-start justify-between min-h-[100px] md:min-h-[120px]",
+                  "relative group w-full p-4 rounded-2xl border-2 transition-all duration-200 flex flex-col items-start justify-between min-h-[100px] md:min-h-[120px] cursor-pointer",
                   isBooked 
-                    ? (isLive ? "bg-blue-50 border-blue-200 shadow-md" : "bg-rose-50 border-rose-100 shadow-inner") 
+                    ? (isLive ? "bg-blue-50 border-blue-200 shadow-md ring-2 ring-blue-400/20" : "bg-rose-50 border-rose-100 shadow-inner") 
                     : "bg-white border-gray-100 hover:border-emerald-500 active:scale-95 shadow-sm"
                 )}
-                onClick={() => !isBooked && onSlotClick(court.id, slot)}
+                onClick={() => isBooked ? onViewDetail(booking) : onSlotClick(court.id, slot)}
               >
                 <div className="flex items-center justify-between w-full mb-2">
                     <div className={cn(
@@ -56,19 +56,16 @@ export const Court: React.FC<CourtProps> = ({ court, bookings, timeSlots, onSlot
                           ? (isLive ? "bg-blue-100 text-blue-800" : "bg-rose-100 text-rose-700") 
                           : "bg-emerald-50 text-emerald-800"
                     )}>
-                         {isLive ? <Play className="w-3.5 h-3.5 fill-blue-800" /> : <Clock className="w-3.5 h-3.5" />}
+                         {isLive ? <Play className="w-3.5 h-3.5 fill-blue-800 animate-pulse" /> : <Clock className="w-3.5 h-3.5" />}
                          {slot.time}
                     </div>
                     {isBooked && (
-                         <button 
-                          onClick={(e) => { e.stopPropagation(); onViewDetail(booking); }}
-                          className={cn(
-                            "p-2 rounded-lg shadow-md transition-all active:scale-90",
-                            isLive ? "bg-blue-600 hover:bg-blue-700" : "bg-emerald-600 hover:bg-emerald-700"
-                          )}
-                         >
+                         <div className={cn(
+                            "p-2 rounded-lg shadow-sm",
+                            isLive ? "bg-blue-600" : "bg-emerald-600"
+                          )}>
                             <Info className="w-4 h-4 text-white" />
-                         </button>
+                         </div>
                     )}
                 </div>
 
@@ -76,7 +73,7 @@ export const Court: React.FC<CourtProps> = ({ court, bookings, timeSlots, onSlot
                      {isBooked ? (
                         <div className="flex flex-col">
                             <span className={cn("text-[8px] font-black uppercase leading-none mb-1", isLive ? "text-blue-500" : "text-rose-400")}>
-                              {isLive ? 'CHƠI TRỰC TIẾP' : 'KHÁCH HÀNG'}
+                              {isLive ? 'ĐANG CHƠI' : 'KHÁCH HÀNG'}
                             </span>
                             <span className={cn("text-sm md:text-lg font-black truncate w-full", isLive ? "text-blue-900" : "text-rose-950")}>
                                 {booking.customerName}
@@ -85,7 +82,7 @@ export const Court: React.FC<CourtProps> = ({ court, bookings, timeSlots, onSlot
                     ) : (
                         <div className="flex flex-col">
                             <span className="text-[8px] text-emerald-400 font-black uppercase leading-none mb-1 tracking-widest">TRẠNG THÁI</span>
-                            <span className="text-xs md:text-base text-gray-400 font-bold uppercase">Đặt lịch</span>
+                            <span className="text-xs md:text-base text-gray-400 font-bold uppercase">Đặt ngay</span>
                         </div>
                     )}
                 </div>
@@ -93,6 +90,10 @@ export const Court: React.FC<CourtProps> = ({ court, bookings, timeSlots, onSlot
             );
           })}
         </div>
+      </div>
+      
+      <div className="p-4 bg-white border-t border-gray-100 text-center">
+         <p className="text-[10px] text-gray-400 font-black uppercase tracking-[0.2em]">Cập nhật mỗi 30 phút</p>
       </div>
     </div>
   );

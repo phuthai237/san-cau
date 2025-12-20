@@ -1,4 +1,3 @@
-
 export interface Product {
   id: string;
   name: string;
@@ -13,6 +12,18 @@ export interface SaleItem {
   price: number;
   costPrice: number;
 }
+
+export const SUPPORTED_BANKS = [
+  { id: 'mbb', name: 'MB Bank (Quân Đội)' },
+  { id: 'vcb', name: 'Vietcombank' },
+  { id: 'tcb', name: 'Techcombank' },
+  { id: 'bidv', name: 'BIDV' },
+  { id: 'ctg', name: 'VietinBank' },
+  { id: 'acb', name: 'ACB' },
+  { id: 'tpb', name: 'TPBank' },
+  { id: 'vpb', name: 'VPBank' },
+  { id: 'agribank', name: 'Agribank' }
+];
 
 export interface BankConfig {
   bankId: string;
