@@ -16,8 +16,8 @@ const DEFAULT_PRODUCTS: Product[] = [
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
 
-// SỬ DỤNG BUCKET CỐ ĐỊNH ĐỂ TRÁNH LỖI KHÔNG TÌM THẤY BUCKET
-const CLOUD_BUCKET = '6vS8mB9z6q2q9q9q9q9q_badm_v5'; 
+// SỬ DỤNG BUCKET MỚI VÀ TOKEN CỐ ĐỊNH ĐỂ ĐẢM BẢO KẾT NỐI
+const CLOUD_BUCKET = 'badm_pro_v6_stable'; 
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -51,39 +51,27 @@ const App: React.FC = () => {
     const cleanId = targetId.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const fullUrl = `https://kvdb.io/${CLOUD_BUCKET}/${cleanId}`;
 
-    if (mode !== 'pull' || syncSt !== 'success') {
-        setSyncSt('syncing');
-        setSyncMsg(mode === 'push' ? 'Đang gửi...' : 'Đang lấy...');
-    }
+    setSyncSt('syncing');
+    setSyncMsg(mode === 'push' ? 'Đang gửi...' : 'Đang lấy...');
 
     try {
       const checkRes = await fetch(`${fullUrl}?t=${Date.now()}`, { cache: 'no-store' });
       let cloudData: any = null;
-      
-      if (checkRes.ok) {
-        cloudData = await checkRes.json();
-      }
+      if (checkRes.ok) cloudData = await checkRes.json();
 
-      // NẾU CLOUD TRỐNG -> TỰ ĐỘNG PUSH DỮ LIỆU HIỆN TẠI LÊN (Chỉ khi lần đầu kết nối)
+      // NẾU CLOUD TRỐNG VÀ ĐANG PULL -> KHỞI TẠO CLOUD TỪ MÁY HIỆN TẠI
       if (!cloudData && (mode === 'pull' || mode === 'force-pull')) {
-        setSyncMsg('Khởi tạo Cloud...');
-        const initTs = Date.now();
-        const payload = JSON.stringify({ 
-          bookings: stateRef.current.bookings, 
-          prods: stateRef.current.products, 
-          bank: stateRef.current.bank, 
-          timestamp: initTs, 
-          updatedAt: new Date().toISOString() 
-        });
-        await fetch(fullUrl, { method: 'PUT', body: payload });
-        lastTimestamp.current = initTs;
-        localStorage.setItem('b-ts', initTs.toString());
-        setSyncSt('success');
-        setSyncMsg('Đã kết nối mã');
-        return;
+          if (stateRef.current.bookings.length > 0 || stateRef.current.products.length > DEFAULT_PRODUCTS.length) {
+              setSyncMsg('Đang tạo Cloud...');
+              mode = 'push'; // Chuyển sang push để đẩy dữ liệu lên
+          } else {
+              setSyncMsg('Cloud Trống');
+              setSyncSt('idle');
+              return;
+          }
       }
 
-      // LẤY DỮ LIỆU VỀ
+      // LẤY DỮ LIỆU VỀ (PULL)
       if (mode === 'pull' || mode === 'force-pull') {
         if (mode === 'force-pull' || cloudData.timestamp > lastTimestamp.current) {
           lockSync.current = true;
@@ -95,16 +83,18 @@ const App: React.FC = () => {
           setCloudHash(cloudData.timestamp.toString().slice(-4));
           setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
           setSyncSt('success');
-          setSyncMsg('Vừa cập nhật');
+          setSyncMsg('Đã cập nhật');
           setTimeout(() => { lockSync.current = false; }, 1000);
+          return;
         } else {
           setSyncSt('success');
-          setSyncMsg('Cloud Trực Tuyến');
+          setSyncMsg('Đồng bộ OK');
           setCloudHash(cloudData.timestamp.toString().slice(-4));
+          return;
         }
       }
 
-      // ĐẨY DỮ LIỆU ĐI
+      // ĐẨY DỮ LIỆU ĐI (PUSH)
       if (mode === 'push') {
         const newTs = Date.now();
         const payload = JSON.stringify({ 
@@ -125,15 +115,15 @@ const App: React.FC = () => {
       }
     } catch (err: any) {
       setSyncSt('error');
-      setSyncMsg('Lỗi Cloud');
+      setSyncMsg('Lỗi kết nối');
     }
   }, [bank]);
 
-  // Tự động kiểm tra Cloud mỗi 6 giây
+  // Kiểm tra định kỳ
   useEffect(() => {
     if (!syncId) return;
     performSync(syncId, 'pull');
-    const interval = setInterval(() => performSync(syncId, 'pull'), 6000);
+    const interval = setInterval(() => performSync(syncId, 'pull'), 8000);
     return () => clearInterval(interval);
   }, [syncId, performSync]);
 
@@ -156,20 +146,17 @@ const App: React.FC = () => {
       start = getStartOfMonth(now);
       start.setHours(0, 0, 0, 0);
     }
-
     const filtered = bookings.filter(b => {
       if (b.status !== 'paid') return false;
       const [y, m, d] = b.date.split('-').map(Number);
       const bDate = new Date(y, m - 1, d);
       return bDate >= start;
     });
-
     const rev = filtered.reduce((acc, b) => acc + (b.totalAmount || 0), 0);
     const serviceCost = filtered.reduce((acc, b) => {
       const itemsCost = (b.serviceItems || []).reduce((sAcc, s) => sAcc + ((s.costPrice || 0) * (s.quantity || 0)), 0);
       return acc + itemsCost;
     }, 0);
-
     return { rev, prof: rev - serviceCost };
   }, [bookings, period]);
 
@@ -199,7 +186,6 @@ const App: React.FC = () => {
     setBookings(prev => prev.map(x => {
       if (x.id === b.id || (b.groupId && x.groupId === b.groupId)) {
         const sTot = (x.serviceItems || []).reduce((a, s) => a + (s.price * s.quantity), 0);
-        // TIỀN SÂN: 1K/PHÚT CHO LIVE, 30K/SLOT CHO ĐẶT TRƯỚC
         const cTot = x.isLive ? finalValue * 1000 : finalValue * 30000;
         return { 
           ...x, 
@@ -220,20 +206,22 @@ const App: React.FC = () => {
       <header className="bg-white border-b sticky top-0 z-40 p-4 safe-pt shadow-sm">
         <div className="flex justify-between items-center max-w-7xl mx-auto">
           <div className="flex items-center gap-3">
-            <div className="bg-emerald-700 p-2 rounded-xl text-white shadow-lg shadow-emerald-100"><Trophy className="w-5 h-5" /></div>
+            <div className="bg-emerald-700 p-2 rounded-xl text-white shadow-lg"><Trophy className="w-5 h-5" /></div>
             <div>
               <h1 className="font-black text-lg uppercase tracking-tighter leading-none">Badminton Pro</h1>
               <div className="flex items-center gap-1.5 mt-1">
                 <span className={cn("w-1.5 h-1.5 rounded-full", syncSt === 'success' ? 'bg-emerald-500' : syncSt === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-rose-500')}></span>
-                <p className="text-[7px] font-black uppercase text-slate-500 tracking-widest">{syncId ? `${syncMsg} #${cloudHash}` : 'CHƯA CÀI MÃ'}</p>
+                <p className="text-[7px] font-black uppercase text-slate-500 tracking-widest">
+                    {syncId ? `${syncId.toUpperCase()}: ${syncMsg}` : 'CHƯA KẾT NỐI MÃ'}
+                </p>
               </div>
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => syncId && performSync(syncId, 'pull')} className="bg-slate-100 p-2.5 rounded-xl active:scale-90 transition-all border border-slate-200">
+            <button onClick={() => syncId && performSync(syncId, 'pull')} className="bg-slate-100 p-2.5 rounded-xl active:scale-90 border border-slate-200">
                <RefreshCcw className={cn("w-4 h-4 text-slate-500", syncSt === 'syncing' && "animate-spin")} />
             </button>
-            <button onClick={() => setModals(m => ({ ...m, quick: true }))} className="bg-emerald-700 text-white px-4 py-2 rounded-xl font-black text-[10px] flex items-center gap-2 active:scale-95 shadow-md shadow-emerald-50">
+            <button onClick={() => setModals(m => ({ ...m, quick: true }))} className="bg-emerald-700 text-white px-4 py-2 rounded-xl font-black text-[10px] flex items-center gap-2 active:scale-95 shadow-md">
               <Play className="w-3 h-3 fill-white" /> CHƠI NGAY
             </button>
           </div>
@@ -312,7 +300,7 @@ const App: React.FC = () => {
                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="bg-emerald-500/20 p-2 rounded-xl"><CloudCheck className="w-6 h-6 text-emerald-400" /></div>
-                    <h4 className="font-black uppercase text-base tracking-tight">Sync 2 Máy</h4>
+                    <h4 className="font-black uppercase text-base tracking-tight">Cài đặt Đồng bộ</h4>
                   </div>
                   <div className="flex items-center gap-2 text-[8px] font-black uppercase text-emerald-400/60 bg-white/5 px-3 py-1.5 rounded-full">
                       <History className="w-3 h-3" /> {lastSyncTime}
@@ -325,25 +313,26 @@ const App: React.FC = () => {
                       value={tmpSync} 
                       onChange={e => setTmpSync(e.target.value)} 
                       className="flex-1 bg-white/5 border border-white/10 px-5 py-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all text-sm" 
-                      placeholder="MÃ ĐỒNG BỘ..." 
+                      placeholder="MÃ ĐỒNG BỘ (VÍ DỤ: 1234)..." 
                     />
                     <button onClick={() => {
                         const cleanId = tmpSync.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
                         if (cleanId.length < 4) return alert("Mã cần ít nhất 4 ký tự!");
                         setSyncId(cleanId);
                         localStorage.setItem('b-sync', cleanId);
+                        // Khi đổi mã, bắt buộc phải PULL trước để tránh ghi đè dữ liệu cũ
                         performSync(cleanId, 'force-pull');
                     }} className="bg-emerald-600 px-6 rounded-2xl active:scale-95 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all"><Save className="w-5 h-5" /></button>
                   </div>
-                  <p className="text-[8px] font-bold text-white/30 uppercase tracking-[0.2em] text-center italic">Nhập cùng 1 mã trên các thiết bị để đồng bộ</p>
+                  <p className="text-[8px] font-bold text-white/30 uppercase tracking-[0.2em] text-center italic">Nhập cùng mã trên cả 2 máy (PC và Android)</p>
                </div>
 
                <div className="grid grid-cols-2 gap-4 pt-2">
                     <button onClick={() => performSync(syncId, 'push')} className="group flex flex-col items-center justify-center gap-2 bg-emerald-600/10 border border-emerald-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-emerald-600 hover:text-white transition-all active:scale-95">
-                       <UploadCloud className="w-6 h-6 mb-1" /> Lưu lên Cloud
+                       <UploadCloud className="w-6 h-6 mb-1" /> Ghi đè lên Cloud
                     </button>
                     <button onClick={() => performSync(syncId, 'force-pull')} className="group flex flex-col items-center justify-center gap-2 bg-blue-600/10 border border-blue-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-blue-600 hover:text-white transition-all active:scale-95">
-                       <DownloadCloud className="w-6 h-6 mb-1" /> Buộc cập nhật
+                       <DownloadCloud className="w-6 h-6 mb-1" /> Tải từ Cloud về
                     </button>
                </div>
             </div>
@@ -356,7 +345,7 @@ const App: React.FC = () => {
                 </select>
                 <input type="text" value={tempBank.accountNo} onChange={e => setTempBank({...tempBank, accountNo: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-2xl font-bold text-xs" placeholder="SỐ TÀI KHOẢN..." />
                 <input type="text" value={tempBank.accountName} onChange={e => setTempBank({...tempBank, accountName: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-2xl font-bold text-xs" placeholder="TÊN TÀI KHOẢN (KHÔNG DẤU)..." />
-                <button onClick={() => { setBank(tempBank); if(syncId) performSync(syncId, 'push'); alert("Đã lưu thông tin ngân hàng!"); }} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black uppercase text-xs active:scale-95 shadow-xl">Cập nhật ngân hàng</button>
+                <button onClick={() => { setBank(tempBank); if(syncId) performSync(syncId, 'push'); alert("Đã lưu!"); }} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black uppercase text-xs active:scale-95">Cập nhật thông tin</button>
               </div>
             </div>
           </div>

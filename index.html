@@ -4,50 +4,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    
-    <!-- iOS support -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Badminton Pro" />
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
-    
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#064e3b" />
-    <meta name="format-detection" content="telephone=no" />
-    
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
-    <link rel="manifest" href="/manifest.json" />
-    
     <title>Badminton Pro</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-      
-      :root {
-        --safe-top: env(safe-area-inset-top);
-        --safe-bottom: env(safe-area-inset-bottom);
-      }
-
-      body {
-        font-family: 'Inter', sans-serif;
-        overscroll-behavior-y: none;
-        -webkit-tap-highlight-color: transparent;
-        background-color: #f9fafb;
-        touch-action: manipulation;
-      }
-
-      @supports (padding: env(safe-area-inset-top)) {
-        .safe-pt { padding-top: var(--safe-top); }
-        .safe-pb { padding-bottom: var(--safe-bottom); }
-      }
-
-      button {
-        cursor: pointer;
-        user-select: none;
-        -webkit-user-select: none;
-        touch-action: manipulation;
-      }
-
+      :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
+      body { font-family: 'Inter', sans-serif; overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; background-color: #f9fafb; touch-action: manipulation; }
+      @supports (padding: env(safe-area-inset-top)) { .safe-pt { padding-top: var(--safe-top); } .safe-pb { padding-bottom: var(--safe-bottom); } }
+      button { cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
       .custom-scrollbar::-webkit-scrollbar { width: 4px; }
       .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
       .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
@@ -68,14 +39,10 @@
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
     <script>
+      // Gỡ bỏ Service Worker cũ nếu có
       if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js', { scope: '/' })
-            .then(reg => {
-              console.log('SW Registered');
-              reg.update();
-            })
-            .catch(err => console.log('SW Failed', err));
+        navigator.serviceWorker.getRegistrations().then(regs => {
+          for(let reg of regs) reg.unregister();
         });
       }
     </script>
