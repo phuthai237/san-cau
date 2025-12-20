@@ -6,7 +6,7 @@ import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell } from 'lucide-react';
 
 const COURTS: CourtType[] = [{ id: 1, name: 'Sân 1 (VIP)' }, { id: 2, name: 'Sân 2 (Thường)' }];
 const DEFAULT_PRODUCTS: Product[] = [
@@ -15,8 +15,7 @@ const DEFAULT_PRODUCTS: Product[] = [
   { id: '3', name: 'Cầu (Quả)', price: 20000, costPrice: 15000 }
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
-// Bucket KVDB công khai để đồng bộ
-const SYNC_URL = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_v4_';
+const SYNC_URL = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_v5_';
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -24,21 +23,24 @@ const App: React.FC = () => {
   const [products, setProducts] = useState<Product[]>(() => JSON.parse(localStorage.getItem('b-prods') || JSON.stringify(DEFAULT_PRODUCTS)));
   const [bank, setBank] = useState<BankConfig>(() => JSON.parse(localStorage.getItem('b-bank') || '{"bankId":"mbb","accountNo":"","accountName":"","apiService":"none","apiKey":""}'));
   const [tempBank, setTempBank] = useState<BankConfig>(bank);
-  const [syncId, setSyncId] = useState(localStorage.getItem('b-sync') || '');
+  
+  const [syncId, setSyncId] = useState(() => localStorage.getItem('b-sync') || '');
   const [tmpSync, setTmpSync] = useState(syncId);
-  const [syncSt, setSyncSt] = useState('idle');
+  
+  const [syncSt, setSyncSt] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [tab, setTab] = useState<'calendar'|'shop'|'stats'|'settings'>('calendar');
   const [modals, setModals] = useState({ booking: false, detail: false, prod: false, quick: false });
   const [pending, setPending] = useState<any>(null);
   const [selB, setSelB] = useState<Booking | null>(null);
   const [period, setPeriod] = useState<'day'|'week'|'month'>('day');
   const [lastNotif, setLastNotif] = useState<string | null>(null);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(typeof Notification !== 'undefined' ? Notification.permission : 'default');
 
   const lockSync = useRef(false);
   const lastTimestamp = useRef(Number(localStorage.getItem('b-ts') || '0'));
 
-  const sync = useCallback(async (isPush = false) => {
-    if (!syncId || (isPush && lockSync.current)) return;
+  const syncData = useCallback(async (targetId: string, isPush = false) => {
+    if (!targetId || (isPush && lockSync.current)) return;
     
     try {
       setSyncSt('syncing');
@@ -46,80 +48,65 @@ const App: React.FC = () => {
         const newTs = Date.now();
         lastTimestamp.current = newTs;
         localStorage.setItem('b-ts', newTs.toString());
-        
-        await fetch(`${SYNC_URL}${syncId}`, { 
+        await fetch(`${SYNC_URL}${targetId}`, { 
             method: 'PUT', 
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ bookings, prods: products, bank, timestamp: newTs }) 
         });
       } else {
-        const r = await fetch(`${SYNC_URL}${syncId}?t=${Date.now()}`);
+        const r = await fetch(`${SYNC_URL}${targetId}?t=${Date.now()}`);
         if (r.ok) {
           const d = await r.json();
-          // Chỉ cập nhật nếu timestamp trên Cloud mới hơn máy hiện tại
           if (d.timestamp > lastTimestamp.current) {
-            lockSync.current = true; // Khóa để tránh useEffect đẩy ngược lên
-            
+            lockSync.current = true;
             if (d.bookings.length > bookings.length) {
-                setLastNotif("CẬP NHẬT: Có đơn đặt sân mới!");
-                sendNotification("Badminton Pro", "Có lịch đặt sân mới vừa được cập nhật!");
-            } else if (d.bookings.some((b: any, i: number) => b.status !== (bookings[i]?.status))) {
-                setLastNotif("CẬP NHẬT: Một đơn sân đã được thanh toán!");
+                setLastNotif("CÓ ĐƠN ĐẶT SÂN MỚI!");
+                sendNotification("Badminton Pro", "Vừa có khách đặt sân mới trên hệ thống!");
             }
-
             lastTimestamp.current = d.timestamp;
             localStorage.setItem('b-ts', d.timestamp.toString());
             setBookings(d.bookings); 
             setProducts(d.prods); 
             setBank(d.bank);
-            
-            // Mở khóa sau khi React đã render xong
-            setTimeout(() => { 
-                lockSync.current = false; 
-                setTimeout(() => setLastNotif(null), 4000);
-            }, 500);
+            setTimeout(() => { lockSync.current = false; setTimeout(() => setLastNotif(null), 5000); }, 1000);
           }
         }
       }
       setSyncSt('success');
-    } catch (e) { 
-      console.error("Sync Error:", e);
-      setSyncSt('error'); 
-    }
-  }, [syncId, bookings, products, bank]);
+    } catch (e) { setSyncSt('error'); }
+  }, [bookings, products, bank]);
 
-  // Đẩy dữ liệu khi có thay đổi nội bộ
+  useEffect(() => {
+    if (!syncId) return;
+    const interval = setInterval(() => syncData(syncId, false), 5000);
+    return () => clearInterval(interval);
+  }, [syncId, syncData]);
+
   useEffect(() => {
     localStorage.setItem('b-bookings', JSON.stringify(bookings));
     localStorage.setItem('b-prods', JSON.stringify(products));
     localStorage.setItem('b-bank', JSON.stringify(bank));
-
     if (syncId && !lockSync.current) {
-        const timer = setTimeout(() => sync(true), 1000); // Debounce push
+        const timer = setTimeout(() => syncData(syncId, true), 1000);
         return () => clearTimeout(timer);
     }
-  }, [bookings, products, bank]);
+  }, [bookings, products, bank, syncId, syncData]);
 
-  // Kiểm tra Cloud mỗi 4 giây
-  useEffect(() => { 
-    if(syncId) { 
-        const i = setInterval(() => sync(false), 4000); 
-        return () => clearInterval(i); 
-    } 
-  }, [syncId, sync]);
+  const handleSaveSync = () => {
+    const cleanId = tmpSync.trim().toUpperCase().replace(/\s+/g, '-');
+    if (!cleanId) return alert("Nhập mã!");
+    setSyncId(cleanId);
+    setTmpSync(cleanId);
+    localStorage.setItem('b-sync', cleanId);
+    syncData(cleanId, false);
+    alert("Đã lưu!");
+  };
 
   const dKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
 
-  const onConfirm = useCallback((data: {
-    name: string;
-    phone: string;
-    durationSlots: number;
-    selectedCourtIds: number[];
-    totalAmount: number;
-    deposit: number;
-  }) => {
+  const onConfirm = useCallback((data: any) => {
     const groupId = data.selectedCourtIds.length > 1 ? Math.random().toString(36).slice(2, 8) : undefined;
-    const newBookings: Booking[] = data.selectedCourtIds.map(courtId => ({
+    const newBookings: Booking[] = data.selectedCourtIds.map((courtId: number) => ({
       id: Math.random().toString(36).slice(2, 8),
       courtId,
       date: dKey,
@@ -138,16 +125,6 @@ const App: React.FC = () => {
     setModals(m => ({ ...m, booking: false }));
   }, [dKey, pending]);
 
-  const onUpdateB = useCallback((updated: Booking) => {
-    setBookings(prev => prev.map(b => b.id === updated.id ? updated : b));
-    setSelB(updated); 
-  }, []);
-
-  const saveBankSettings = () => {
-    setBank(tempBank);
-    alert("Đã lưu cấu hình tài khoản!");
-  };
-  
   const stats = useMemo(() => {
     const now = new Date();
     const start = period === 'day' ? dKey : (period === 'week' ? formatDateKey(getStartOfWeek(now)) : formatDateKey(getStartOfMonth(now)));
@@ -158,272 +135,187 @@ const App: React.FC = () => {
   }, [bookings, period, dKey]);
 
   return (
-    <div className="min-h-screen pb-24 bg-slate-100 font-inter text-slate-900">
-      {/* Toast Notification for Cloud Sync */}
+    <div className="min-h-screen pb-28 bg-slate-50 font-inter text-slate-900">
       {lastNotif && (
-          <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm animate-in slide-in-from-top duration-500">
-              <div className="bg-emerald-950 text-white p-5 rounded-[2rem] shadow-2xl flex items-center gap-4 border-2 border-emerald-400/50 backdrop-blur-lg">
-                  <div className="bg-emerald-500 p-2.5 rounded-2xl animate-bounce shadow-lg shadow-emerald-500/50">
-                    <BellRing className="w-6 h-6" />
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-black text-[10px] uppercase tracking-widest text-emerald-400 mb-0.5">Cloud Sync</p>
-                    <p className="font-black text-sm uppercase leading-tight">{lastNotif}</p>
-                  </div>
-                  <button onClick={() => setLastNotif(null)} className="p-2 bg-white/10 rounded-xl"><X className="w-4 h-4" /></button>
+          <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[100] w-[90%] max-w-sm">
+              <div className="bg-emerald-950 text-white p-4 rounded-3xl shadow-2xl flex items-center gap-3 border-2 border-emerald-400/50">
+                  <BellRing className="w-5 h-5 text-emerald-400 animate-bounce" />
+                  <p className="font-black text-xs uppercase flex-1">{lastNotif}</p>
+                  <button onClick={() => setLastNotif(null)} className="p-1"><X className="w-4 h-4" /></button>
               </div>
           </div>
       )}
 
-      <header className="bg-white border-b-2 border-slate-200 sticky top-0 z-40 p-4 safe-pt shadow-lg">
+      <header className="bg-white border-b sticky top-0 z-40 p-4 safe-pt shadow-sm">
         <div className="flex justify-between items-center max-w-7xl mx-auto">
           <div className="flex items-center gap-3">
-            <div className="bg-emerald-700 p-2.5 rounded-2xl text-white shadow-xl shadow-emerald-200"><Trophy className="w-6 h-6" /></div>
+            <div className="bg-emerald-700 p-2 rounded-xl text-white"><Trophy className="w-5 h-5" /></div>
             <div>
-              <h1 className="font-black text-2xl uppercase tracking-tighter leading-none text-emerald-950">Badminton Pro</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <span className={cn("w-2 h-2 rounded-full", syncSt === 'success' ? "bg-blue-500 animate-pulse" : "bg-slate-300")}></span>
-                <p className={cn("text-[9px] font-black uppercase tracking-widest", syncSt === 'success' ? "text-blue-700" : "text-slate-400")}>
-                  {syncSt === 'syncing' ? 'ĐANG ĐỒNG BỘ...' : syncSt === 'success' ? 'ĐÃ KẾT NỐI CLOUD' : 'CHẾ ĐỘ NGOẠI TUYẾN'}
-                </p>
-              </div>
+              <h1 className="font-black text-lg uppercase tracking-tighter leading-none">Badminton Pro</h1>
+              <p className="text-[8px] font-black uppercase text-emerald-600 mt-1">{syncId ? 'CLOUD: ' + syncId : 'NGOẠI TUYẾN'}</p>
             </div>
           </div>
-          <button onClick={() => setModals(m => ({ ...m, quick: true }))} className="bg-emerald-700 hover:bg-emerald-800 text-white px-6 py-3 rounded-2xl font-black text-xs flex gap-2 shadow-xl active:scale-95 transition-all">
-            <Play className="w-4 h-4 fill-white" /> CHƠI NGAY
+          <button onClick={() => setModals(m => ({ ...m, quick: true }))} className="bg-emerald-700 text-white px-4 py-2 rounded-xl font-black text-[10px] flex items-center gap-2">
+            <Play className="w-3 h-3 fill-white" /> CHƠI NGAY
           </button>
         </div>
       </header>
 
-      <main className="p-4 max-w-7xl mx-auto space-y-6">
+      <main className="p-3 max-w-7xl mx-auto space-y-4">
         {tab === 'calendar' && (
-          <div className="space-y-6 animate-in fade-in duration-300">
-            <div className="bg-white p-5 rounded-[2.5rem] flex items-center justify-between shadow-md border-2 border-slate-200">
-              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d); }} className="p-3 bg-slate-100 rounded-2xl text-slate-900 hover:bg-slate-200 active:scale-90 transition-all"><ChevronLeft className="w-7 h-7" /></button>
+          <div className="space-y-4 animate-in fade-in duration-300">
+            <div className="bg-white p-4 rounded-3xl flex items-center justify-between border shadow-sm">
+              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()-1); setSelectedDate(d); }} className="p-2 bg-slate-50 rounded-lg active:scale-90"><ChevronLeft className="w-5 h-5" /></button>
               <div className="text-center">
-                <p className="text-[11px] font-black text-emerald-700 uppercase tracking-[0.3em] mb-1">LỊCH THI ĐẤU</p>
-                <h2 className="text-2xl font-black uppercase text-slate-950">{selectedDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
+                <p className="text-[9px] font-black text-emerald-700 uppercase mb-0.5">NGÀY THI ĐẤU</p>
+                <h2 className="text-base font-black uppercase">{selectedDate.toLocaleDateString('vi-VN', { day: 'numeric', month: 'short' })}</h2>
               </div>
-              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d); }} className="p-3 bg-slate-100 rounded-2xl text-slate-900 hover:bg-slate-200 active:scale-90 transition-all"><ChevronRight className="w-7 h-7" /></button>
+              <button onClick={() => { const d = new Date(selectedDate); d.setDate(d.getDate()+1); setSelectedDate(d); }} className="p-2 bg-slate-50 rounded-lg active:scale-90"><ChevronRight className="w-5 h-5" /></button>
             </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pb-12">
               {COURTS.map(c => <Court key={c.id} court={c} bookings={bookings.filter(b => b.courtId === c.id && b.date === dKey && b.status === 'active')} timeSlots={TIME_SLOTS} onSlotClick={(ct, s) => { setPending({ courtId: ct, slot: s }); setModals(m => ({ ...m, booking: true })); }} onViewDetail={b => { setSelB(b); setModals(m => ({ ...m, detail: true })); }} />)}
             </div>
           </div>
         )}
 
         {tab === 'shop' && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            <div className="flex justify-between items-center px-2">
-              <h2 className="text-3xl font-black uppercase text-slate-950 flex items-center gap-4"><Package className="text-emerald-700 w-10 h-10" /> Kho hàng</h2>
-              <button onClick={() => setModals(m => ({ ...m, prod: true }))} className="bg-emerald-700 text-white px-6 py-4 rounded-2xl font-black text-xs flex gap-2 shadow-xl active:scale-95 transition-all"><Plus className="w-6 h-6" /> THÊM MỚI</button>
+          <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-300">
+            <div className="flex justify-between items-center px-1">
+              <h2 className="text-xl font-black uppercase text-slate-950">Kho dịch vụ</h2>
+              <button onClick={() => setModals(m => ({ ...m, prod: true }))} className="bg-emerald-700 text-white p-2.5 rounded-xl shadow active:scale-95"><Plus className="w-5 h-5" /></button>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            
+            {/* Grid hàng hóa được tối ưu nhỏ hơn */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
               {products.map(p => (
-                <div key={p.id} className="bg-white p-7 rounded-[2.5rem] border-2 border-slate-200 shadow-md hover:shadow-xl transition-all flex flex-col justify-between">
-                  <div>
-                    <div className="flex justify-between items-start mb-6">
-                      <div className="bg-emerald-50 p-5 rounded-3xl text-emerald-800 shadow-inner border border-emerald-100"><ShoppingBag className="w-7 h-7" /></div>
-                      <button onClick={() => setProducts(products.filter(x => x.id !== p.id))} className="text-slate-400 hover:text-rose-600 p-2.5 hover:bg-rose-50 rounded-2xl transition-all"><Trash2 className="w-6 h-6" /></button>
-                    </div>
-                    <h3 className="font-black text-slate-950 uppercase text-lg mb-1 leading-tight">{p.name}</h3>
-                    <p className="text-emerald-700 font-black text-2xl">{formatVND(p.price)}</p>
+                <div key={p.id} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between group active:scale-95 transition-all">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="bg-emerald-50 p-2 rounded-lg text-emerald-700"><ShoppingBag className="w-4 h-4" /></div>
+                    <button 
+                      onClick={(e) => { e.stopPropagation(); if(confirm('Xóa?')) setProducts(products.filter(x => x.id !== p.id)); }} 
+                      className="text-slate-300 hover:text-rose-500 p-1"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
                   </div>
-                  <div className="mt-8 pt-6 border-t-2 border-slate-50 flex justify-between items-center text-[11px] font-black uppercase tracking-widest">
-                    <span className="text-slate-500">Vốn: {formatVND(p.costPrice)}</span>
-                    <span className="bg-emerald-50 text-emerald-700 px-3 py-1.5 rounded-xl border border-emerald-100">Lãi: {formatVND(p.price - p.costPrice)}</span>
+                  <div className="space-y-0.5">
+                    <h3 className="font-black text-slate-800 uppercase text-[11px] leading-tight truncate">{p.name}</h3>
+                    <p className="text-emerald-700 font-black text-sm">{formatVND(p.price)}</p>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-slate-50 flex justify-between items-center">
+                    <span className="text-[8px] font-bold text-slate-400 uppercase">Vốn: {formatVND(p.costPrice).replace('₫', '')}</span>
                   </div>
                 </div>
               ))}
+              {products.length === 0 && (
+                <div className="col-span-full py-12 text-center bg-white border-2 border-dashed border-slate-200 rounded-3xl opacity-50">
+                  <p className="text-xs font-black uppercase tracking-widest">Kho đang trống</p>
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {tab === 'stats' && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-            <div className="flex flex-col sm:flex-row gap-6 items-center justify-between px-2">
-              <h2 className="text-3xl font-black uppercase text-slate-950 flex items-center gap-4"><BarChart3 className="text-emerald-700 w-10 h-10" /> Thống kê</h2>
-              <div className="bg-white p-2 rounded-[1.5rem] border-2 border-slate-200 flex gap-1 shadow-md">
-                {(['day', 'week', 'month'] as const).map(p => (
-                  <button key={p} onClick={() => setPeriod(p)} className={cn("px-8 py-3.5 rounded-2xl text-xs font-black uppercase transition-all", period === p ? "bg-emerald-700 text-white shadow-xl" : "text-slate-600 hover:bg-slate-100")}>
-                    {p === 'day' ? 'Hôm nay' : p === 'week' ? 'Tuần này' : 'Tháng này'}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-4 animate-in fade-in duration-300">
+            <div className="flex justify-between items-center">
+                <h2 className="text-xl font-black uppercase">Báo cáo</h2>
+                <div className="bg-white p-1 rounded-xl border flex gap-1">
+                    {(['day', 'week', 'month'] as const).map(p => (
+                        <button key={p} onClick={() => setPeriod(p)} className={cn("px-3 py-1.5 rounded-lg text-[9px] font-black uppercase", period === p ? "bg-emerald-700 text-white" : "text-slate-500")}>
+                            {p === 'day' ? 'Ngày' : p === 'week' ? 'Tuần' : 'Tháng'}
+                        </button>
+                    ))}
+                </div>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-              <div className="bg-emerald-950 p-10 rounded-[3rem] text-white shadow-2xl relative overflow-hidden group">
-                <TrendingUp className="absolute right-[-10%] bottom-[-10%] w-48 h-48 opacity-10 group-hover:scale-110 transition-transform duration-1000" />
-                <p className="text-[12px] font-black text-emerald-400 uppercase tracking-[0.4em] mb-3">Lợi nhuận ròng</p>
-                <p className="text-6xl font-black tabular-nums tracking-tighter mb-6 drop-shadow-lg">{formatVND(stats.prof)}</p>
-                <div className="flex items-center gap-2 text-xs font-black bg-white/10 w-fit px-5 py-2 rounded-full border border-white/20 uppercase tracking-widest">
-                  <ArrowUpRight className="w-4 h-4" /> {stats.count} đơn đã thanh toán
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="bg-emerald-950 p-6 rounded-3xl text-white shadow-lg relative overflow-hidden">
+                <TrendingUp className="absolute -right-2 -bottom-2 w-20 h-20 opacity-10" />
+                <p className="text-[9px] font-black text-emerald-400 uppercase mb-1">Lợi nhuận ròng</p>
+                <p className="text-2xl font-black">{formatVND(stats.prof)}</p>
               </div>
-              <div className="bg-white p-10 rounded-[3rem] border-2 border-slate-200 shadow-md flex flex-col justify-between">
-                <div>
-                  <div className="bg-blue-100 w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-blue-800 mb-8 shadow-inner border border-blue-200"><TrendingUp className="w-8 h-8" /></div>
-                  <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Tổng doanh thu</p>
-                  <p className="text-4xl font-black text-slate-950 tabular-nums">{formatVND(stats.rev)}</p>
-                </div>
+              <div className="bg-white p-5 rounded-2xl border shadow-sm">
+                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Doanh thu</p>
+                <p className="text-lg font-black">{formatVND(stats.rev)}</p>
               </div>
-              <div className="bg-white p-10 rounded-[3rem] border-2 border-slate-200 shadow-md flex flex-col justify-between">
-                <div>
-                  <div className="bg-rose-100 w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-rose-800 mb-8 shadow-inner border border-rose-200"><Wallet className="w-8 h-8" /></div>
-                  <p className="text-[12px] font-black text-slate-500 uppercase tracking-[0.2em] mb-2">Tổng tiền vốn</p>
-                  <p className="text-4xl font-black text-rose-700 tabular-nums">{formatVND(stats.cost)}</p>
-                </div>
+              <div className="bg-white p-5 rounded-2xl border shadow-sm">
+                <p className="text-[9px] font-black text-slate-400 uppercase mb-1">Thanh toán</p>
+                <p className="text-lg font-black">{stats.count} đơn</p>
               </div>
             </div>
           </div>
         )}
 
         {tab === 'settings' && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 max-w-2xl mx-auto">
-            <div className="text-center space-y-2">
-               <div className="w-24 h-24 bg-emerald-100 text-emerald-700 rounded-full mx-auto flex items-center justify-center shadow-inner border-4 border-white">
-                  <UserIcon className="w-12 h-12" />
+          <div className="space-y-6 animate-in slide-in-from-bottom-4 max-w-2xl mx-auto pb-12">
+            <div className="bg-slate-900 p-6 rounded-3xl text-white space-y-4 shadow-xl border-b-4 border-emerald-900">
+               <div className="flex items-center gap-3">
+                  <CloudLightning className="w-6 h-6 text-emerald-400" />
+                  <h4 className="font-black uppercase text-base">Đồng bộ Cloud</h4>
                </div>
-               <h2 className="text-3xl font-black uppercase text-slate-950">Cấu hình hệ thống</h2>
-            </div>
-
-            <div className="bg-white p-10 rounded-[3rem] border-2 border-slate-200 shadow-xl space-y-8">
-              <div className="space-y-6">
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-950 uppercase ml-2 tracking-widest">Ngân hàng VietQR</label>
-                  <select 
-                    value={tempBank.bankId} 
-                    onChange={e => setTempBank({...tempBank, bankId: e.target.value})}
-                    className="w-full bg-slate-50 border-2 border-slate-200 p-5 rounded-2xl font-black text-slate-950 focus:border-emerald-700 outline-none shadow-sm transition-all"
-                  >
-                    {SUPPORTED_BANKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-950 uppercase ml-2 tracking-widest">Số tài khoản</label>
-                  <input 
-                    type="text"
-                    value={tempBank.accountNo} 
-                    onChange={e => setTempBank({...tempBank, accountNo: e.target.value})} 
-                    className="w-full bg-slate-50 border-2 border-slate-200 p-5 rounded-2xl font-black text-slate-950 focus:border-emerald-700 outline-none shadow-sm transition-all" 
-                    placeholder="SỐ TÀI KHOẢN..." 
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-xs font-black text-slate-950 uppercase ml-2 tracking-widest">Tên chủ tài khoản (KHÔNG DẤU)</label>
-                  <input 
-                    type="text"
-                    value={tempBank.accountName} 
-                    onChange={e => setTempBank({...tempBank, accountName: e.target.value})} 
-                    className="w-full bg-slate-50 border-2 border-slate-200 p-5 rounded-2xl font-black text-slate-950 focus:border-emerald-700 outline-none shadow-sm transition-all placeholder:opacity-30" 
-                    placeholder="VD: NGUYEN VAN A..." 
-                  />
-                </div>
-              </div>
-
-              <div className="pt-4 flex gap-4">
-                <button 
-                  onClick={saveBankSettings} 
-                  className="flex-1 bg-emerald-700 hover:bg-emerald-800 text-white py-6 rounded-3xl font-black text-sm flex items-center justify-center gap-3 shadow-2xl active:scale-95 transition-all uppercase tracking-widest"
-                >
-                  <Save className="w-6 h-6" /> Lưu tài khoản
-                </button>
-              </div>
-            </div>
-            
-            <div className="bg-slate-900 p-10 rounded-[3rem] text-white space-y-6 shadow-2xl border-2 border-emerald-900/30 relative overflow-hidden">
-               <div className="absolute top-0 right-0 p-10 opacity-5">
-                  <CloudLightning className="w-32 h-32" />
-               </div>
-               <div className="flex items-center gap-3 relative z-10">
-                  <ShieldCheck className="w-8 h-8 text-emerald-400" />
-                  <h4 className="font-black uppercase text-xl tracking-tight">Đồng bộ Cloud</h4>
-               </div>
-               <p className="text-[11px] text-white/50 uppercase font-black px-1 tracking-widest">Mã đồng bộ giúp kết nối nhiều điện thoại với nhau</p>
-               <div className="flex gap-4 relative z-10">
+               <div className="flex gap-2">
                   <input 
                     value={tmpSync} 
-                    onChange={e => setTmpSync(e.target.value.toUpperCase())} 
-                    className="flex-1 bg-white/5 border-2 border-white/10 p-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all placeholder:text-white/20 text-lg" 
-                    placeholder="VD: SAN-CAU-VIP" 
+                    onChange={e => setTmpSync(e.target.value)} 
+                    className="flex-1 bg-white/10 border border-white/10 px-4 py-4 rounded-2xl font-black text-white outline-none focus:border-emerald-500 text-sm uppercase" 
+                    placeholder="MÃ ĐỒNG BỘ..." 
                   />
-                  <button 
-                    onClick={() => { 
-                      if(!tmpSync) return alert("Vui lòng nhập mã!");
-                      setSyncId(tmpSync); 
-                      localStorage.setItem('b-sync', tmpSync); 
-                      sync(false); // Thử kéo dữ liệu mới ngay lập tức
-                      alert("Đã áp dụng mã đồng bộ!"); 
-                    }} 
-                    className="bg-emerald-600 px-8 rounded-2xl hover:bg-emerald-500 transition-all active:scale-90 shadow-lg shadow-emerald-500/20"
-                  >
-                    <CheckCircle className="w-8 h-8" />
-                  </button>
+                  <button onClick={handleSaveSync} className="bg-emerald-600 px-6 rounded-2xl active:scale-95"><Save className="w-5 h-5" /></button>
                </div>
-               <div className="flex items-center justify-between px-2 pt-2">
-                  <p className="text-[10px] text-emerald-400/80 font-black uppercase italic tracking-wider">Tự động cập nhật mỗi 4 giây</p>
-                  <button onClick={() => sync(false)} className="flex items-center gap-2 text-[10px] font-black uppercase text-blue-400 hover:text-blue-300 transition-colors">
-                    <RefreshCw className={cn("w-3 h-3", syncSt === 'syncing' ? "animate-spin" : "")} /> Đồng bộ thủ công
-                  </button>
-               </div>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl border shadow-lg space-y-4">
+              <h4 className="font-black uppercase text-sm ml-1">VietQR & Thông báo</h4>
+              <div className="space-y-3">
+                <button onClick={async () => { await Notification.requestPermission(); setNotifPerm(Notification.permission); alert('Đã yêu cầu!'); }} className="w-full py-4 bg-blue-50 text-blue-700 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 border-2 border-blue-100">
+                  <Bell className="w-4 h-4" /> Bật thông báo đẩy ({notifPerm})
+                </button>
+                <select value={tempBank.bankId} onChange={e => setTempBank({...tempBank, bankId: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-xl font-bold text-xs outline-none">
+                  {SUPPORTED_BANKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+                <input type="text" value={tempBank.accountNo} onChange={e => setTempBank({...tempBank, accountNo: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-xl font-bold text-xs" placeholder="SỐ TÀI KHOẢN..." />
+                <input type="text" value={tempBank.accountName} onChange={e => setTempBank({...tempBank, accountName: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-xl font-bold text-xs" placeholder="TÊN KHÔNG DẤU..." />
+                <button onClick={() => { setBank(tempBank); alert("Đã lưu!"); }} className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black uppercase text-xs">Lưu ngân hàng</button>
+              </div>
             </div>
           </div>
         )}
       </main>
 
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-slate-200 p-4 flex justify-around items-center safe-pb rounded-t-[3rem] shadow-[0_-15px_50px_rgba(0,0,0,0.15)] z-50">
+      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-3 flex justify-around items-center safe-pb rounded-t-3xl shadow-[0_-10px_30px_rgba(0,0,0,0.05)] z-50">
         {[
-          { id: 'calendar', icon: CalendarIcon, l: 'Lịch sân' }, 
-          { id: 'shop', icon: ShoppingBag, l: 'Dịch vụ' }, 
+          { id: 'calendar', icon: CalendarIcon, l: 'Lịch' }, 
+          { id: 'shop', icon: ShoppingBag, l: 'Kho' }, 
           { id: 'stats', icon: BarChart3, l: 'Báo cáo' },
-          { id: 'settings', icon: UserIcon, l: 'Cài đặt' }
+          { id: 'settings', icon: Settings2, l: 'Cài đặt' }
         ].map(i => (
-          <button key={i.id} onClick={() => setTab(i.id as any)} className={cn("flex flex-col items-center gap-2 px-6 py-4 rounded-[2rem] transition-all flex-1 mx-1", tab === i.id ? "text-emerald-800 bg-emerald-50 shadow-inner" : "text-slate-400 hover:text-slate-600")}>
-            <i.icon className={cn("w-6 h-6 transition-transform", tab === i.id ? "scale-110" : "")} />
-            <span className="text-[10px] font-black uppercase tracking-tighter whitespace-nowrap">{i.l}</span>
+          <button key={i.id} onClick={() => setTab(i.id as any)} className={cn("flex flex-col items-center gap-1 px-4 py-2 rounded-xl transition-all", tab === i.id ? "text-emerald-800 bg-emerald-50" : "text-slate-400")}>
+            <i.icon className="w-4 h-4" />
+            <span className="text-[8px] font-black uppercase">{i.l}</span>
           </button>
         ))}
       </nav>
 
       {modals.quick && (
-        <div className="fixed inset-0 z-[100] bg-slate-950/70 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white rounded-[3rem] w-full max-w-sm overflow-hidden shadow-2xl animate-in zoom-in-95">
-            <div className="bg-emerald-900 p-8 text-white flex justify-between items-center">
-              <h3 className="font-black text-xl uppercase tracking-tight">Vào chơi ngay</h3>
-              <button onClick={() => setModals(m => ({...m, quick: false}))} className="p-2 bg-white/10 rounded-full hover:bg-white/20 transition-all"><X className="w-6 h-6"/></button>
+        <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white rounded-[2rem] w-full max-w-sm overflow-hidden shadow-2xl">
+            <div className="bg-emerald-900 p-5 text-white flex justify-between items-center">
+              <h3 className="font-black text-sm uppercase">Vào chơi nhanh</h3>
+              <button onClick={() => setModals(m => ({...m, quick: false}))} className="p-1"><X className="w-5 h-5"/></button>
             </div>
-            <div className="p-8 space-y-4">
+            <div className="p-4 space-y-2">
               {COURTS.map(c => (
                 <button key={c.id} onClick={() => {
                   const now = new Date(); 
-                  const hour = now.getHours().toString().padStart(2, '0');
-                  const minute = now.getMinutes() < 30 ? '00' : '30';
-                  const timeStr = `${hour}:${minute}`;
-                  
+                  const h = now.getHours().toString().padStart(2, '0');
+                  const m = now.getMinutes() < 30 ? '00' : '30';
                   const b: Booking = { 
-                    id: Math.random().toString(36).slice(2, 8), 
-                    courtId: c.id, 
-                    date: dKey, 
-                    timeSlot: timeStr, 
-                    actualStartTime: now.toISOString(), 
-                    isLive: true, 
-                    customerName: `KHÁCH LẺ SÂN ${c.id}`, 
-                    phoneNumber: "VÀO CHƠI TRỰC TIẾP", 
-                    totalAmount: 0, 
-                    deposit: 0, 
-                    remainingAmount: 0, 
-                    serviceItems: [], 
-                    status: 'active', 
-                    durationSlots: 1 
+                    id: Math.random().toString(36).slice(2, 8), courtId: c.id, date: dKey, timeSlot: `${h}:${m}`, actualStartTime: now.toISOString(), isLive: true, customerName: `KHÁCH SÂN ${c.id}`, phoneNumber: "CHƠI NGAY", totalAmount: 0, deposit: 0, remainingAmount: 0, serviceItems: [], status: 'active', durationSlots: 1 
                   };
-                  setBookings(prev => [...prev, b]); 
-                  setModals({ ...modals, quick: false });
-                }} className="w-full p-7 bg-slate-50 border-2 border-slate-200 rounded-[2rem] font-black uppercase text-slate-800 hover:border-emerald-600 hover:bg-emerald-50 transition-all active:scale-95 shadow-sm text-lg flex items-center justify-between group">
+                  setBookings(prev => [...prev, b]); setModals({ ...modals, quick: false });
+                }} className="w-full p-5 bg-slate-50 border rounded-2xl font-black uppercase text-xs flex justify-between items-center hover:border-emerald-500">
                   {c.name}
-                  <ArrowUpRight className="w-6 h-6 text-slate-300 group-hover:text-emerald-600 transition-colors" />
+                  <ArrowUpRight className="w-4 h-4 opacity-30" />
                 </button>
               ))}
             </div>
@@ -432,11 +324,7 @@ const App: React.FC = () => {
       )}
 
       <BookingModal isOpen={modals.booking} onClose={() => setModals(m => ({ ...m, booking: false }))} onConfirm={onConfirm} courts={COURTS} initialCourtId={pending?.courtId || 0} dateStr={dKey} timeSlot={pending?.slot || null} allTimeSlots={TIME_SLOTS} checkAvailability={() => true} />
-      <BookingDetailModal isOpen={modals.detail} onClose={() => setModals(m => ({ ...m, detail: false }))} booking={selB} products={products} bankConfig={bank} onUpdateBooking={onUpdateB} onCheckout={(b) => { 
-        const updated = bookings.map(x => (x.id === b.id || x.groupId === b.groupId) ? { ...x, status: 'paid' as const } : x);
-        setBookings(updated); 
-        setModals(m => ({ ...m, detail: false })); 
-      }} />
+      <BookingDetailModal isOpen={modals.detail} onClose={() => setModals(m => ({ ...m, detail: false }))} booking={selB} products={products} bankConfig={bank} onUpdateBooking={(u) => setBookings(prev => prev.map(b => b.id === u.id ? u : b))} onCheckout={(b) => { setBookings(prev => prev.map(x => (x.id === b.id || x.groupId === b.groupId) ? { ...x, status: 'paid' as const } : x)); setModals(m => ({ ...m, detail: false })); }} />
       <ProductModal isOpen={modals.prod} onClose={() => setModals(m => ({ ...m, prod: false }))} onConfirm={p => setProducts(v => [...v, { ...p, id: Date.now().toString() }])} />
     </div>
   );
