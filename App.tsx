@@ -6,7 +6,7 @@ import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell, DownloadCloud, UploadCloud, AlertCircle } from 'lucide-react';
 
 const COURTS: CourtType[] = [{ id: 1, name: 'Sân 1 (VIP)' }, { id: 2, name: 'Sân 2 (Thường)' }];
 const DEFAULT_PRODUCTS: Product[] = [
@@ -15,7 +15,8 @@ const DEFAULT_PRODUCTS: Product[] = [
   { id: '3', name: 'Cầu (Quả)', price: 20000, costPrice: 15000 }
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
-const SYNC_URL = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_v5_';
+// Sử dụng một bucket KVDB công khai và ổn định hơn
+const SYNC_URL = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_pro_v6_';
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -26,8 +27,9 @@ const App: React.FC = () => {
   
   const [syncId, setSyncId] = useState(() => localStorage.getItem('b-sync') || '');
   const [tmpSync, setTmpSync] = useState(syncId);
-  
   const [syncSt, setSyncSt] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [syncMsg, setSyncMsg] = useState('');
+  
   const [tab, setTab] = useState<'calendar'|'shop'|'stats'|'settings'>('calendar');
   const [modals, setModals] = useState({ booking: false, detail: false, prod: false, quick: false });
   const [pending, setPending] = useState<any>(null);
@@ -39,67 +41,95 @@ const App: React.FC = () => {
   const lockSync = useRef(false);
   const lastTimestamp = useRef(Number(localStorage.getItem('b-ts') || '0'));
 
-  const syncData = useCallback(async (targetId: string, isPush = false) => {
-    if (!targetId || (isPush && lockSync.current)) return;
+  // Hàm đồng bộ dữ liệu (Push & Pull)
+  const performSync = useCallback(async (targetId: string, mode: 'push' | 'pull' | 'auto') => {
+    if (!targetId) return;
     
+    setSyncSt('syncing');
+    setSyncMsg(mode === 'push' ? 'Đang đẩy dữ liệu...' : 'Đang tải dữ liệu...');
+
     try {
-      setSyncSt('syncing');
-      if (isPush) {
+      if (mode === 'push' || (mode === 'auto' && !lockSync.current)) {
         const newTs = Date.now();
+        const payload = { bookings, prods: products, bank, timestamp: newTs };
+        
+        const res = await fetch(`${SYNC_URL}${targetId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          mode: 'cors'
+        });
+
+        if (!res.ok) throw new Error('Không thể lưu dữ liệu lên Cloud');
+        
         lastTimestamp.current = newTs;
         localStorage.setItem('b-ts', newTs.toString());
-        await fetch(`${SYNC_URL}${targetId}`, { 
-            method: 'PUT', 
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ bookings, prods: products, bank, timestamp: newTs }) 
-        });
-      } else {
-        const r = await fetch(`${SYNC_URL}${targetId}?t=${Date.now()}`);
-        if (r.ok) {
-          const d = await r.json();
-          if (d.timestamp > lastTimestamp.current) {
+        if (mode !== 'auto') alert('Đã đẩy dữ liệu lên thành công!');
+      } 
+      
+      if (mode === 'pull' || mode === 'auto') {
+        const res = await fetch(`${SYNC_URL}${targetId}?t=${Date.now()}`, { mode: 'cors', cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.timestamp > lastTimestamp.current) {
             lockSync.current = true;
-            if (d.bookings.length > bookings.length) {
-                setLastNotif("CÓ ĐƠN ĐẶT SÂN MỚI!");
-                sendNotification("Badminton Pro", "Vừa có khách đặt sân mới trên hệ thống!");
+            
+            // Nếu có đơn mới thì báo
+            if (data.bookings.length > bookings.length) {
+              setLastNotif("Hệ thống vừa cập nhật đơn mới!");
+              sendNotification("Badminton Pro", "Dữ liệu đã được đồng bộ từ máy khác.");
             }
-            lastTimestamp.current = d.timestamp;
-            localStorage.setItem('b-ts', d.timestamp.toString());
-            setBookings(d.bookings); 
-            setProducts(d.prods); 
-            setBank(d.bank);
-            setTimeout(() => { lockSync.current = false; setTimeout(() => setLastNotif(null), 5000); }, 1000);
+
+            setBookings(data.bookings);
+            setProducts(data.prods);
+            setBank(data.bank);
+            lastTimestamp.current = data.timestamp;
+            localStorage.setItem('b-ts', data.timestamp.toString());
+            
+            setTimeout(() => { lockSync.current = false; }, 2000);
+            if (mode === 'pull') alert('Đã tải dữ liệu mới nhất!');
+          } else if (mode === 'pull') {
+            alert('Dữ liệu trên máy bạn đã là mới nhất!');
           }
+        } else if (mode === 'pull') {
+          throw new Error('Không tìm thấy dữ liệu trên Cloud');
         }
       }
+
       setSyncSt('success');
-    } catch (e) { setSyncSt('error'); }
+      setSyncMsg('Đã kết nối');
+    } catch (err: any) {
+      console.error(err);
+      setSyncSt('error');
+      setSyncMsg(err.message || 'Lỗi kết nối Cloud');
+    }
   }, [bookings, products, bank]);
 
+  // Auto Pull mỗi 10 giây
   useEffect(() => {
     if (!syncId) return;
-    const interval = setInterval(() => syncData(syncId, false), 5000);
+    const interval = setInterval(() => performSync(syncId, 'auto'), 10000);
     return () => clearInterval(interval);
-  }, [syncId, syncData]);
+  }, [syncId, performSync]);
 
+  // Auto Push khi có thay đổi (Debounced)
   useEffect(() => {
     localStorage.setItem('b-bookings', JSON.stringify(bookings));
     localStorage.setItem('b-prods', JSON.stringify(products));
     localStorage.setItem('b-bank', JSON.stringify(bank));
+
     if (syncId && !lockSync.current) {
-        const timer = setTimeout(() => syncData(syncId, true), 1000);
-        return () => clearTimeout(timer);
+      const timer = setTimeout(() => performSync(syncId, 'auto'), 2000);
+      return () => clearTimeout(timer);
     }
-  }, [bookings, products, bank, syncId, syncData]);
+  }, [bookings, products, bank, syncId]);
 
   const handleSaveSync = () => {
     const cleanId = tmpSync.trim().toUpperCase().replace(/\s+/g, '-');
-    if (!cleanId) return alert("Nhập mã!");
+    if (!cleanId) return alert("Vui lòng nhập mã!");
     setSyncId(cleanId);
-    setTmpSync(cleanId);
     localStorage.setItem('b-sync', cleanId);
-    syncData(cleanId, false);
-    alert("Đã lưu!");
+    performSync(cleanId, 'pull'); // Thử tải ngay khi lưu mã
   };
 
   const dKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
@@ -152,7 +182,10 @@ const App: React.FC = () => {
             <div className="bg-emerald-700 p-2 rounded-xl text-white"><Trophy className="w-5 h-5" /></div>
             <div>
               <h1 className="font-black text-lg uppercase tracking-tighter leading-none">Badminton Pro</h1>
-              <p className="text-[8px] font-black uppercase text-emerald-600 mt-1">{syncId ? 'CLOUD: ' + syncId : 'NGOẠI TUYẾN'}</p>
+              <div className="flex items-center gap-1.5 mt-1">
+                <span className={cn("w-1.5 h-1.5 rounded-full", syncSt === 'success' ? 'bg-emerald-500' : syncSt === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-rose-500')}></span>
+                <p className="text-[7px] font-black uppercase text-slate-500 tracking-widest">{syncId ? syncMsg : 'CHƯA ĐỒNG BỘ'}</p>
+              </div>
             </div>
           </div>
           <button onClick={() => setModals(m => ({ ...m, quick: true }))} className="bg-emerald-700 text-white px-4 py-2 rounded-xl font-black text-[10px] flex items-center gap-2">
@@ -181,37 +214,29 @@ const App: React.FC = () => {
         {tab === 'shop' && (
           <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-300">
             <div className="flex justify-between items-center px-1">
-              <h2 className="text-xl font-black uppercase text-slate-950">Kho dịch vụ</h2>
-              <button onClick={() => setModals(m => ({ ...m, prod: true }))} className="bg-emerald-700 text-white p-2.5 rounded-xl shadow active:scale-95"><Plus className="w-5 h-5" /></button>
+              <h2 className="text-xl font-black uppercase text-slate-950">Kho hàng</h2>
+              <button onClick={() => setModals(m => ({ ...m, prod: true }))} className="bg-emerald-700 text-white p-2 rounded-xl shadow active:scale-95"><Plus className="w-5 h-5" /></button>
             </div>
             
-            {/* Grid hàng hóa được tối ưu nhỏ hơn */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
               {products.map(p => (
-                <div key={p.id} className="bg-white p-3 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between group active:scale-95 transition-all">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="bg-emerald-50 p-2 rounded-lg text-emerald-700"><ShoppingBag className="w-4 h-4" /></div>
+                <div key={p.id} className="bg-white p-2 rounded-xl border border-slate-100 shadow-sm flex flex-col justify-between group active:bg-slate-50 transition-colors">
+                  <div className="flex justify-between items-start mb-1">
+                    <div className="bg-emerald-50 p-1.5 rounded-lg text-emerald-700"><ShoppingBag className="w-3 h-3" /></div>
                     <button 
                       onClick={(e) => { e.stopPropagation(); if(confirm('Xóa?')) setProducts(products.filter(x => x.id !== p.id)); }} 
-                      className="text-slate-300 hover:text-rose-500 p-1"
+                      className="text-slate-300 hover:text-rose-500 p-0.5"
                     >
-                      <Trash2 className="w-4 h-4" />
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                   <div className="space-y-0.5">
-                    <h3 className="font-black text-slate-800 uppercase text-[11px] leading-tight truncate">{p.name}</h3>
-                    <p className="text-emerald-700 font-black text-sm">{formatVND(p.price)}</p>
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-slate-50 flex justify-between items-center">
-                    <span className="text-[8px] font-bold text-slate-400 uppercase">Vốn: {formatVND(p.costPrice).replace('₫', '')}</span>
+                    <h3 className="font-black text-slate-800 uppercase text-[9px] leading-tight truncate">{p.name}</h3>
+                    <p className="text-emerald-700 font-black text-[11px]">{formatVND(p.price).replace('₫', '')}</p>
                   </div>
                 </div>
               ))}
-              {products.length === 0 && (
-                <div className="col-span-full py-12 text-center bg-white border-2 border-dashed border-slate-200 rounded-3xl opacity-50">
-                  <p className="text-xs font-black uppercase tracking-widest">Kho đang trống</p>
-                </div>
-              )}
+              {products.length === 0 && <div className="col-span-full py-10 text-center opacity-30 text-[10px] font-black uppercase">Kho trống</div>}
             </div>
           </div>
         )}
@@ -247,12 +272,16 @@ const App: React.FC = () => {
         )}
 
         {tab === 'settings' && (
-          <div className="space-y-6 animate-in slide-in-from-bottom-4 max-w-2xl mx-auto pb-12">
-            <div className="bg-slate-900 p-6 rounded-3xl text-white space-y-4 shadow-xl border-b-4 border-emerald-900">
-               <div className="flex items-center gap-3">
-                  <CloudLightning className="w-6 h-6 text-emerald-400" />
-                  <h4 className="font-black uppercase text-base">Đồng bộ Cloud</h4>
+          <div className="space-y-6 animate-in slide-in-from-bottom-4 max-w-2xl mx-auto pb-12 px-1">
+            <div className="bg-slate-900 p-6 rounded-3xl text-white space-y-5 shadow-xl border-b-4 border-emerald-900">
+               <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <CloudLightning className="w-6 h-6 text-emerald-400" />
+                    <h4 className="font-black uppercase text-base">Đồng bộ Cloud</h4>
+                  </div>
+                  {syncSt === 'error' && <AlertCircle className="w-5 h-5 text-rose-500 animate-pulse" />}
                </div>
+
                <div className="flex gap-2">
                   <input 
                     value={tmpSync} 
@@ -262,12 +291,27 @@ const App: React.FC = () => {
                   />
                   <button onClick={handleSaveSync} className="bg-emerald-600 px-6 rounded-2xl active:scale-95"><Save className="w-5 h-5" /></button>
                </div>
+
+               {syncId && (
+                 <div className="grid grid-cols-2 gap-3 pt-2">
+                    <button onClick={() => performSync(syncId, 'push')} className="flex items-center justify-center gap-2 bg-white/5 border border-white/10 py-4 rounded-2xl font-black text-[10px] uppercase hover:bg-white/10 transition-all">
+                       <UploadCloud className="w-4 h-4 text-emerald-400" /> Đẩy lên Cloud
+                    </button>
+                    <button onClick={() => performSync(syncId, 'pull')} className="flex items-center justify-center gap-2 bg-white/5 border border-white/10 py-4 rounded-2xl font-black text-[10px] uppercase hover:bg-white/10 transition-all">
+                       <DownloadCloud className="w-4 h-4 text-blue-400" /> Tải từ Cloud
+                    </button>
+                 </div>
+               )}
+
+               <p className={cn("text-[9px] font-bold text-center uppercase tracking-widest px-2 py-2 rounded-lg", syncSt === 'error' ? 'bg-rose-500/20 text-rose-400' : 'text-white/40')}>
+                  {syncSt === 'error' ? 'Lỗi: ' + syncMsg : 'Lưu ý: "Đẩy lên" sẽ ghi đè dữ liệu Cloud bằng dữ liệu máy này.'}
+               </p>
             </div>
 
             <div className="bg-white p-6 rounded-3xl border shadow-lg space-y-4">
               <h4 className="font-black uppercase text-sm ml-1">VietQR & Thông báo</h4>
               <div className="space-y-3">
-                <button onClick={async () => { await Notification.requestPermission(); setNotifPerm(Notification.permission); alert('Đã yêu cầu!'); }} className="w-full py-4 bg-blue-50 text-blue-700 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 border-2 border-blue-100">
+                <button onClick={async () => { await Notification.requestPermission(); setNotifPerm(Notification.permission); alert('Đã cấp quyền!'); }} className="w-full py-4 bg-blue-50 text-blue-700 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 border-2 border-blue-100">
                   <Bell className="w-4 h-4" /> Bật thông báo đẩy ({notifPerm})
                 </button>
                 <select value={tempBank.bankId} onChange={e => setTempBank({...tempBank, bankId: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-xl font-bold text-xs outline-none">
