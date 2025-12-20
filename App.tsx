@@ -15,8 +15,9 @@ const DEFAULT_PRODUCTS: Product[] = [
   { id: '3', name: 'Cầu (Quả)', price: 20000, costPrice: 15000 }
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
-// Sử dụng một bucket KVDB công khai và ổn định hơn
-const SYNC_URL = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_pro_v6_';
+
+// SỬ DỤNG BUCKET MỚI VÀ ỔN ĐỊNH HƠN
+const SYNC_URL = 'https://kvdb.io/S3VzV1p4Z2h4Z2h4Z2h4/bad_v10_';
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -36,100 +37,111 @@ const App: React.FC = () => {
   const [selB, setSelB] = useState<Booking | null>(null);
   const [period, setPeriod] = useState<'day'|'week'|'month'>('day');
   const [lastNotif, setLastNotif] = useState<string | null>(null);
-  const [notifPerm, setNotifPerm] = useState<NotificationPermission>(typeof Notification !== 'undefined' ? Notification.permission : 'default');
 
   const lockSync = useRef(false);
   const lastTimestamp = useRef(Number(localStorage.getItem('b-ts') || '0'));
 
-  // Hàm đồng bộ dữ liệu (Push & Pull)
+  // Cải thiện hàm đồng bộ
   const performSync = useCallback(async (targetId: string, mode: 'push' | 'pull' | 'auto') => {
     if (!targetId) return;
     
+    // Tránh spam auto sync khi đang xử lý
+    if (mode === 'auto' && syncSt === 'syncing') return;
+
     setSyncSt('syncing');
-    setSyncMsg(mode === 'push' ? 'Đang đẩy dữ liệu...' : 'Đang tải dữ liệu...');
+    setSyncMsg(mode === 'push' ? 'Đang gửi...' : mode === 'pull' ? 'Đang tải...' : 'Đang kết nối...');
 
     try {
       if (mode === 'push' || (mode === 'auto' && !lockSync.current)) {
         const newTs = Date.now();
-        const payload = { bookings, prods: products, bank, timestamp: newTs };
+        const payload = JSON.stringify({ bookings, prods: products, bank, timestamp: newTs });
         
+        // Kiểm tra dung lượng (giới hạn KVDB thường là 64KB cho free)
+        if (payload.length > 60000) {
+           throw new Error("Dữ liệu quá lớn để đồng bộ!");
+        }
+
         const res = await fetch(`${SYNC_URL}${targetId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-          mode: 'cors'
+          body: payload,
+          mode: 'cors',
+          cache: 'no-store'
         });
 
-        if (!res.ok) throw new Error('Không thể lưu dữ liệu lên Cloud');
+        if (!res.ok) {
+           const errText = res.status === 413 ? "Dữ liệu quá tải" : `Lỗi ${res.status}`;
+           throw new Error(errText);
+        }
         
         lastTimestamp.current = newTs;
         localStorage.setItem('b-ts', newTs.toString());
-        if (mode !== 'auto') alert('Đã đẩy dữ liệu lên thành công!');
+        if (mode === 'push') alert('Đã sao lưu lên Cloud!');
       } 
       
       if (mode === 'pull' || mode === 'auto') {
-        const res = await fetch(`${SYNC_URL}${targetId}?t=${Date.now()}`, { mode: 'cors', cache: 'no-store' });
+        const res = await fetch(`${SYNC_URL}${targetId}?t=${Date.now()}`, { 
+           mode: 'cors', 
+           cache: 'no-store' 
+        });
+
         if (res.ok) {
           const data = await res.json();
           if (data && data.timestamp > lastTimestamp.current) {
             lockSync.current = true;
             
-            // Nếu có đơn mới thì báo
             if (data.bookings.length > bookings.length) {
-              setLastNotif("Hệ thống vừa cập nhật đơn mới!");
-              sendNotification("Badminton Pro", "Dữ liệu đã được đồng bộ từ máy khác.");
+              setLastNotif("ĐÃ CẬP NHẬT DỮ LIỆU MỚI!");
+              sendNotification("Badminton Pro", "Có đơn đặt sân mới từ thiết bị khác.");
             }
 
-            setBookings(data.bookings);
-            setProducts(data.prods);
-            setBank(data.bank);
+            setBookings(data.bookings || []);
+            setProducts(data.prods || DEFAULT_PRODUCTS);
+            setBank(data.bank || bank);
             lastTimestamp.current = data.timestamp;
             localStorage.setItem('b-ts', data.timestamp.toString());
             
-            setTimeout(() => { lockSync.current = false; }, 2000);
-            if (mode === 'pull') alert('Đã tải dữ liệu mới nhất!');
+            setTimeout(() => { lockSync.current = false; }, 3000);
+            if (mode === 'pull') alert('Tải dữ liệu thành công!');
           } else if (mode === 'pull') {
-            alert('Dữ liệu trên máy bạn đã là mới nhất!');
+            alert('Dữ liệu Cloud không có gì mới.');
           }
-        } else if (mode === 'pull') {
-          throw new Error('Không tìm thấy dữ liệu trên Cloud');
         }
       }
 
       setSyncSt('success');
-      setSyncMsg('Đã kết nối');
+      setSyncMsg('Đã đồng bộ');
     } catch (err: any) {
-      console.error(err);
+      console.warn("Sync error:", err);
       setSyncSt('error');
-      setSyncMsg(err.message || 'Lỗi kết nối Cloud');
+      setSyncMsg(err.message || 'Lỗi mạng');
     }
-  }, [bookings, products, bank]);
+  }, [bookings, products, bank, syncSt]);
 
-  // Auto Pull mỗi 10 giây
+  // Sync tự động
   useEffect(() => {
     if (!syncId) return;
-    const interval = setInterval(() => performSync(syncId, 'auto'), 10000);
+    const interval = setInterval(() => performSync(syncId, 'auto'), 15000);
     return () => clearInterval(interval);
   }, [syncId, performSync]);
 
-  // Auto Push khi có thay đổi (Debounced)
   useEffect(() => {
     localStorage.setItem('b-bookings', JSON.stringify(bookings));
     localStorage.setItem('b-prods', JSON.stringify(products));
     localStorage.setItem('b-bank', JSON.stringify(bank));
 
     if (syncId && !lockSync.current) {
-      const timer = setTimeout(() => performSync(syncId, 'auto'), 2000);
+      const timer = setTimeout(() => performSync(syncId, 'auto'), 3000);
       return () => clearTimeout(timer);
     }
   }, [bookings, products, bank, syncId]);
 
   const handleSaveSync = () => {
-    const cleanId = tmpSync.trim().toUpperCase().replace(/\s+/g, '-');
-    if (!cleanId) return alert("Vui lòng nhập mã!");
+    const cleanId = tmpSync.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cleanId.length < 4) return alert("Mã cần ít nhất 4 ký tự!");
     setSyncId(cleanId);
     localStorage.setItem('b-sync', cleanId);
-    performSync(cleanId, 'pull'); // Thử tải ngay khi lưu mã
+    performSync(cleanId, 'pull');
   };
 
   const dKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
@@ -184,7 +196,7 @@ const App: React.FC = () => {
               <h1 className="font-black text-lg uppercase tracking-tighter leading-none">Badminton Pro</h1>
               <div className="flex items-center gap-1.5 mt-1">
                 <span className={cn("w-1.5 h-1.5 rounded-full", syncSt === 'success' ? 'bg-emerald-500' : syncSt === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-rose-500')}></span>
-                <p className="text-[7px] font-black uppercase text-slate-500 tracking-widest">{syncId ? syncMsg : 'CHƯA ĐỒNG BỘ'}</p>
+                <p className="text-[7px] font-black uppercase text-slate-500 tracking-widest">{syncId ? syncMsg : 'OFFLINE'}</p>
               </div>
             </div>
           </div>
@@ -212,31 +224,32 @@ const App: React.FC = () => {
         )}
 
         {tab === 'shop' && (
-          <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-300">
-            <div className="flex justify-between items-center px-1">
+          <div className="space-y-4 animate-in slide-in-from-bottom-4 duration-300 px-1">
+            <div className="flex justify-between items-center">
               <h2 className="text-xl font-black uppercase text-slate-950">Kho hàng</h2>
               <button onClick={() => setModals(m => ({ ...m, prod: true }))} className="bg-emerald-700 text-white p-2 rounded-xl shadow active:scale-95"><Plus className="w-5 h-5" /></button>
             </div>
             
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            {/* Tối ưu hiển thị 3 cột trên di động */}
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-8 gap-2">
               {products.map(p => (
                 <div key={p.id} className="bg-white p-2 rounded-xl border border-slate-100 shadow-sm flex flex-col justify-between group active:bg-slate-50 transition-colors">
                   <div className="flex justify-between items-start mb-1">
-                    <div className="bg-emerald-50 p-1.5 rounded-lg text-emerald-700"><ShoppingBag className="w-3 h-3" /></div>
+                    <div className="bg-emerald-50 p-1 rounded-lg text-emerald-700"><ShoppingBag className="w-2.5 h-2.5" /></div>
                     <button 
                       onClick={(e) => { e.stopPropagation(); if(confirm('Xóa?')) setProducts(products.filter(x => x.id !== p.id)); }} 
-                      className="text-slate-300 hover:text-rose-500 p-0.5"
+                      className="text-slate-200 hover:text-rose-500 p-0.5"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
-                  <div className="space-y-0.5">
-                    <h3 className="font-black text-slate-800 uppercase text-[9px] leading-tight truncate">{p.name}</h3>
-                    <p className="text-emerald-700 font-black text-[11px]">{formatVND(p.price).replace('₫', '')}</p>
+                  <div className="space-y-0.5 overflow-hidden">
+                    <h3 className="font-black text-slate-800 uppercase text-[8px] leading-tight truncate">{p.name}</h3>
+                    <p className="text-emerald-700 font-black text-[10px]">{formatVND(p.price).replace('₫', '')}</p>
                   </div>
                 </div>
               ))}
-              {products.length === 0 && <div className="col-span-full py-10 text-center opacity-30 text-[10px] font-black uppercase">Kho trống</div>}
+              {products.length === 0 && <div className="col-span-full py-10 text-center opacity-30 text-[10px] font-black uppercase tracking-widest">Kho trống</div>}
             </div>
           </div>
         )}
@@ -304,16 +317,13 @@ const App: React.FC = () => {
                )}
 
                <p className={cn("text-[9px] font-bold text-center uppercase tracking-widest px-2 py-2 rounded-lg", syncSt === 'error' ? 'bg-rose-500/20 text-rose-400' : 'text-white/40')}>
-                  {syncSt === 'error' ? 'Lỗi: ' + syncMsg : 'Lưu ý: "Đẩy lên" sẽ ghi đè dữ liệu Cloud bằng dữ liệu máy này.'}
+                  {syncSt === 'error' ? 'LỖI: ' + syncMsg.toUpperCase() : 'Nhấn "Đẩy lên" để đồng bộ dữ liệu của máy này làm chuẩn.'}
                </p>
             </div>
 
             <div className="bg-white p-6 rounded-3xl border shadow-lg space-y-4">
-              <h4 className="font-black uppercase text-sm ml-1">VietQR & Thông báo</h4>
+              <h4 className="font-black uppercase text-sm ml-1">VietQR & Ngân hàng</h4>
               <div className="space-y-3">
-                <button onClick={async () => { await Notification.requestPermission(); setNotifPerm(Notification.permission); alert('Đã cấp quyền!'); }} className="w-full py-4 bg-blue-50 text-blue-700 rounded-2xl font-black uppercase text-[10px] flex items-center justify-center gap-2 border-2 border-blue-100">
-                  <Bell className="w-4 h-4" /> Bật thông báo đẩy ({notifPerm})
-                </button>
                 <select value={tempBank.bankId} onChange={e => setTempBank({...tempBank, bankId: e.target.value})} className="w-full bg-slate-50 border p-4 rounded-xl font-bold text-xs outline-none">
                   {SUPPORTED_BANKS.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
@@ -354,7 +364,7 @@ const App: React.FC = () => {
                   const h = now.getHours().toString().padStart(2, '0');
                   const m = now.getMinutes() < 30 ? '00' : '30';
                   const b: Booking = { 
-                    id: Math.random().toString(36).slice(2, 8), courtId: c.id, date: dKey, timeSlot: `${h}:${m}`, actualStartTime: now.toISOString(), isLive: true, customerName: `KHÁCH SÂN ${c.id}`, phoneNumber: "CHƠI NGAY", totalAmount: 0, deposit: 0, remainingAmount: 0, serviceItems: [], status: 'active', durationSlots: 1 
+                    id: Math.random().toString(36).slice(2, 8), courtId: c.id, date: dKey, timeSlot: `${h}:${m}`, actualStartTime: now.toISOString(), isLive: true, customerName: `KHÁCH SÂN ${c.id}`, phoneNumber: "TRỰC TIẾP", totalAmount: 0, deposit: 0, remainingAmount: 0, serviceItems: [], status: 'active', durationSlots: 1 
                   };
                   setBookings(prev => [...prev, b]); setModals({ ...modals, quick: false });
                 }} className="w-full p-5 bg-slate-50 border rounded-2xl font-black uppercase text-xs flex justify-between items-center hover:border-emerald-500">
