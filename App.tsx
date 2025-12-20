@@ -6,7 +6,7 @@ import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell, DownloadCloud, UploadCloud, AlertCircle, RefreshCcw, Landmark, Share2, History, CloudCheck } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell, DownloadCloud, UploadCloud, AlertCircle, RefreshCcw, Landmark, Share2, History, CloudCheck, Wifi, WifiOff } from 'lucide-react';
 
 const COURTS: CourtType[] = [{ id: 1, name: 'Sân 1 (VIP)' }, { id: 2, name: 'Sân 2 (Thường)' }];
 const DEFAULT_PRODUCTS: Product[] = [
@@ -16,8 +16,8 @@ const DEFAULT_PRODUCTS: Product[] = [
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
 
-// SỬ DỤNG BUCKET MỚI VÀ TOKEN CỐ ĐỊNH ĐỂ ĐẢM BẢO KẾT NỐI
-const CLOUD_BUCKET = 'badm_pro_v6_stable'; 
+// BUCKET DUY NHẤT CHO TOÀN BỘ HỆ THỐNG
+const CLOUD_BUCKET = 'badm_pro_v7_global'; 
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -31,7 +31,6 @@ const App: React.FC = () => {
   const [syncSt, setSyncSt] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
   const [syncMsg, setSyncMsg] = useState('');
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => localStorage.getItem('b-last-sync') || 'Chưa kết nối');
-  const [cloudHash, setCloudHash] = useState('');
   
   const [tab, setTab] = useState<'calendar'|'shop'|'stats'|'settings'>('calendar');
   const [modals, setModals] = useState({ booking: false, detail: false, prod: false, quick: false });
@@ -48,78 +47,104 @@ const App: React.FC = () => {
   const performSync = useCallback(async (targetId: string, mode: 'push' | 'pull' | 'force-pull') => {
     if (!targetId || lockSync.current) return;
     
+    // Chuẩn hóa mã ID: xóa khoảng trắng, viết thường
     const cleanId = targetId.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const fullUrl = `https://kvdb.io/${CLOUD_BUCKET}/${cleanId}`;
 
-    setSyncSt('syncing');
-    setSyncMsg(mode === 'push' ? 'Đang gửi...' : 'Đang lấy...');
+    if (mode !== 'pull' || syncSt === 'error') {
+      setSyncSt('syncing');
+    }
 
     try {
-      const checkRes = await fetch(`${fullUrl}?t=${Date.now()}`, { cache: 'no-store' });
+      // Thêm timestamp vào URL để chống cache trên Android
+      const checkRes = await fetch(`${fullUrl}?nocache=${Date.now()}`, { 
+        cache: 'no-store',
+        headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+      });
+      
       let cloudData: any = null;
-      if (checkRes.ok) cloudData = await checkRes.json();
-
-      // NẾU CLOUD TRỐNG VÀ ĐANG PULL -> KHỞI TẠO CLOUD TỪ MÁY HIỆN TẠI
-      if (!cloudData && (mode === 'pull' || mode === 'force-pull')) {
-          if (stateRef.current.bookings.length > 0 || stateRef.current.products.length > DEFAULT_PRODUCTS.length) {
-              setSyncMsg('Đang tạo Cloud...');
-              mode = 'push'; // Chuyển sang push để đẩy dữ liệu lên
-          } else {
-              setSyncMsg('Cloud Trống');
-              setSyncSt('idle');
-              return;
-          }
+      if (checkRes.ok) {
+        const text = await checkRes.text();
+        if (text) cloudData = JSON.parse(text);
       }
 
-      // LẤY DỮ LIỆU VỀ (PULL)
+      // 1. TRƯỜNG HỢP CLOUD TRỐNG (MÃ MỚI)
+      if (!cloudData) {
+        if (mode === 'push' || (mode === 'pull' && stateRef.current.bookings.length > 0)) {
+           setSyncMsg('Đang tạo Cloud...');
+           await doPush(fullUrl);
+        } else {
+           setSyncMsg('Cloud Trống');
+           setSyncSt('idle');
+        }
+        return;
+      }
+
+      // 2. LẤY DỮ LIỆU VỀ (PULL / AUTO-SYNC)
       if (mode === 'pull' || mode === 'force-pull') {
-        if (mode === 'force-pull' || cloudData.timestamp > lastTimestamp.current) {
+        const cloudTs = Number(cloudData.timestamp || 0);
+        
+        // Chỉ cập nhật nếu Cloud mới hơn hoặc bị ép buộc
+        if (mode === 'force-pull' || cloudTs > lastTimestamp.current) {
           lockSync.current = true;
           setBookings(cloudData.bookings || []);
           setProducts(cloudData.prods || DEFAULT_PRODUCTS);
           setBank(cloudData.bank || bank);
-          lastTimestamp.current = cloudData.timestamp;
-          localStorage.setItem('b-ts', cloudData.timestamp.toString());
-          setCloudHash(cloudData.timestamp.toString().slice(-4));
+          lastTimestamp.current = cloudTs;
+          localStorage.setItem('b-ts', cloudTs.toString());
           setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
           setSyncSt('success');
           setSyncMsg('Đã cập nhật');
           setTimeout(() => { lockSync.current = false; }, 1000);
-          return;
+        } else if (lastTimestamp.current > cloudTs && mode === 'pull') {
+          // Nếu máy hiện tại mới hơn Cloud -> Tự động đẩy lên để các máy khác nhận
+          await doPush(fullUrl);
         } else {
           setSyncSt('success');
           setSyncMsg('Đồng bộ OK');
-          setCloudHash(cloudData.timestamp.toString().slice(-4));
-          return;
         }
       }
 
-      // ĐẨY DỮ LIỆU ĐI (PUSH)
+      // 3. ĐẨY DỮ LIỆU ĐI (PUSH)
       if (mode === 'push') {
-        const newTs = Date.now();
-        const payload = JSON.stringify({ 
-          bookings: stateRef.current.bookings, 
-          prods: stateRef.current.products, 
-          bank: stateRef.current.bank, 
-          timestamp: newTs, 
-          updatedAt: new Date().toISOString() 
-        });
-        
-        await fetch(fullUrl, { method: 'PUT', body: payload });
-        lastTimestamp.current = newTs;
-        localStorage.setItem('b-ts', newTs.toString());
-        setCloudHash(newTs.toString().slice(-4));
-        setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
-        setSyncSt('success');
-        setSyncMsg('Đã lưu Cloud');
+        await doPush(fullUrl);
       }
+
     } catch (err: any) {
+      console.error("Sync Error:", err);
       setSyncSt('error');
-      setSyncMsg('Lỗi kết nối');
+      setSyncMsg('Lỗi mạng');
     }
   }, [bank]);
 
-  // Kiểm tra định kỳ
+  const doPush = async (url: string) => {
+    const newTs = Date.now();
+    const payload = JSON.stringify({ 
+      bookings: stateRef.current.bookings, 
+      prods: stateRef.current.products, 
+      bank: stateRef.current.bank, 
+      timestamp: newTs,
+      device: navigator.userAgent.includes('Android') ? 'Android' : 'PC'
+    });
+    
+    const res = await fetch(url, { 
+      method: 'PUT', 
+      body: payload,
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (res.ok) {
+      lastTimestamp.current = newTs;
+      localStorage.setItem('b-ts', newTs.toString());
+      setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
+      setSyncSt('success');
+      setSyncMsg('Đã lưu Cloud');
+    } else {
+      throw new Error("Push failed");
+    }
+  };
+
+  // Vòng lặp kiểm tra Cloud (8 giây một lần là tối ưu cho 3-4 máy)
   useEffect(() => {
     if (!syncId) return;
     performSync(syncId, 'pull');
@@ -131,8 +156,9 @@ const App: React.FC = () => {
     localStorage.setItem('b-bookings', JSON.stringify(bookings));
     localStorage.setItem('b-prods', JSON.stringify(products));
     localStorage.setItem('b-bank', JSON.stringify(bank));
+    localStorage.setItem('b-sync', syncId);
     localStorage.setItem('b-last-sync', lastSyncTime);
-  }, [bookings, products, bank, lastSyncTime]);
+  }, [bookings, products, bank, syncId, lastSyncTime]);
 
   const stats = useMemo(() => {
     const now = new Date();
@@ -211,8 +237,8 @@ const App: React.FC = () => {
               <h1 className="font-black text-lg uppercase tracking-tighter leading-none">Badminton Pro</h1>
               <div className="flex items-center gap-1.5 mt-1">
                 <span className={cn("w-1.5 h-1.5 rounded-full", syncSt === 'success' ? 'bg-emerald-500' : syncSt === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-rose-500')}></span>
-                <p className="text-[7px] font-black uppercase text-slate-500 tracking-widest">
-                    {syncId ? `${syncId.toUpperCase()}: ${syncMsg}` : 'CHƯA KẾT NỐI MÃ'}
+                <p className="text-[8px] font-black uppercase text-slate-500 tracking-widest">
+                    {syncId ? `${syncId.toUpperCase()} • ${syncMsg}` : 'CHƯA CÓ MÃ'}
                 </p>
               </div>
             </div>
@@ -296,42 +322,50 @@ const App: React.FC = () => {
 
         {tab === 'settings' && (
           <div className="space-y-6 max-w-2xl mx-auto pb-12 px-1">
-            <div className="bg-slate-900 p-6 rounded-[2.5rem] text-white space-y-6 shadow-2xl border-b-8 border-slate-950">
-               <div className="flex items-center justify-between">
+            <div className="bg-slate-900 p-6 rounded-[2.5rem] text-white space-y-6 shadow-2xl border-b-8 border-slate-950 overflow-hidden relative">
+               <div className="absolute top-0 right-0 p-8 opacity-10"><Wifi className="w-20 h-20" /></div>
+               <div className="flex items-center justify-between relative z-10">
                   <div className="flex items-center gap-3">
                     <div className="bg-emerald-500/20 p-2 rounded-xl"><CloudCheck className="w-6 h-6 text-emerald-400" /></div>
-                    <h4 className="font-black uppercase text-base tracking-tight">Cài đặt Đồng bộ</h4>
+                    <h4 className="font-black uppercase text-base tracking-tight">KẾT NỐI ĐA THIẾT BỊ</h4>
                   </div>
                   <div className="flex items-center gap-2 text-[8px] font-black uppercase text-emerald-400/60 bg-white/5 px-3 py-1.5 rounded-full">
                       <History className="w-3 h-3" /> {lastSyncTime}
                   </div>
                </div>
 
-               <div className="space-y-3">
-                  <div className="flex gap-2 relative">
+               <div className="space-y-4 relative z-10">
+                  <div className="flex gap-2">
                     <input 
                       value={tmpSync} 
                       onChange={e => setTmpSync(e.target.value)} 
-                      className="flex-1 bg-white/5 border border-white/10 px-5 py-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all text-sm" 
-                      placeholder="MÃ ĐỒNG BỘ (VÍ DỤ: 1234)..." 
+                      className="flex-1 bg-white/5 border border-white/10 px-5 py-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all text-sm uppercase" 
+                      placeholder="MÃ KẾT NỐI (VD: 9999)..." 
                     />
                     <button onClick={() => {
                         const cleanId = tmpSync.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-                        if (cleanId.length < 4) return alert("Mã cần ít nhất 4 ký tự!");
+                        if (cleanId.length < 3) return alert("Mã cần ít nhất 3 ký tự!");
                         setSyncId(cleanId);
                         localStorage.setItem('b-sync', cleanId);
-                        // Khi đổi mã, bắt buộc phải PULL trước để tránh ghi đè dữ liệu cũ
                         performSync(cleanId, 'force-pull');
-                    }} className="bg-emerald-600 px-6 rounded-2xl active:scale-95 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all"><Save className="w-5 h-5" /></button>
+                    }} className="bg-emerald-600 px-6 rounded-2xl active:scale-95 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all flex items-center justify-center"><Save className="w-5 h-5" /></button>
                   </div>
-                  <p className="text-[8px] font-bold text-white/30 uppercase tracking-[0.2em] text-center italic">Nhập cùng mã trên cả 2 máy (PC và Android)</p>
+                  
+                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
+                    <p className="text-[10px] font-bold text-white/40 uppercase mb-3 text-center">HƯỚNG DẪN KẾT NỐI 3-4 MÁY:</p>
+                    <ul className="text-[9px] space-y-2 text-white/60 font-medium">
+                      <li className="flex gap-2 items-start"><CheckCircle className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" /> 1. Nhập cùng 1 mã ID trên tất cả các máy.</li>
+                      <li className="flex gap-2 items-start"><CheckCircle className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" /> 2. Nhấn nút <Save className="w-2 h-2 inline" /> để xác nhận mã trên từng máy.</li>
+                      <li className="flex gap-2 items-start"><CheckCircle className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" /> 3. Nếu máy Android chưa thấy dữ liệu, nhấn nút <DownloadCloud className="w-2 h-2 inline" /> phía dưới.</li>
+                    </ul>
+                  </div>
                </div>
 
-               <div className="grid grid-cols-2 gap-4 pt-2">
-                    <button onClick={() => performSync(syncId, 'push')} className="group flex flex-col items-center justify-center gap-2 bg-emerald-600/10 border border-emerald-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-emerald-600 hover:text-white transition-all active:scale-95">
-                       <UploadCloud className="w-6 h-6 mb-1" /> Ghi đè lên Cloud
+               <div className="grid grid-cols-2 gap-4 pt-2 relative z-10">
+                    <button onClick={() => { if(confirm("Bạn muốn đẩy dữ liệu máy này lên Cloud để các máy khác tải về?")) performSync(syncId, 'push'); }} className="group flex flex-col items-center justify-center gap-2 bg-emerald-600/10 border border-emerald-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-emerald-600 hover:text-white transition-all active:scale-95">
+                       <UploadCloud className="w-6 h-6 mb-1" /> Đẩy lên Cloud
                     </button>
-                    <button onClick={() => performSync(syncId, 'force-pull')} className="group flex flex-col items-center justify-center gap-2 bg-blue-600/10 border border-blue-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-blue-600 hover:text-white transition-all active:scale-95">
+                    <button onClick={() => { if(confirm("Bạn muốn xóa dữ liệu máy này và tải dữ liệu từ Cloud về?")) performSync(syncId, 'force-pull'); }} className="group flex flex-col items-center justify-center gap-2 bg-blue-600/10 border border-blue-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-blue-600 hover:text-white transition-all active:scale-95">
                        <DownloadCloud className="w-6 h-6 mb-1" /> Tải từ Cloud về
                     </button>
                </div>
