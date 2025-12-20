@@ -14,14 +14,24 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="theme-color" content="#064e3b" />
     <link rel="icon" type="image/png" href="https://cdn-icons-png.flaticon.com/512/3058/3058284.png" />
-    <title>Badminton Pro</title>
+    <title>Badminton Pro v10</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
       :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
-      body { font-family: 'Inter', sans-serif; overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; background-color: #f9fafb; touch-action: manipulation; }
+      body { 
+        font-family: 'Inter', sans-serif; 
+        overscroll-behavior-y: none; 
+        -webkit-tap-highlight-color: transparent; 
+        background-color: #f8fafc; 
+        touch-action: manipulation;
+        -webkit-user-select: none;
+        user-select: none;
+      }
       @supports (padding: env(safe-area-inset-top)) { .safe-pt { padding-top: var(--safe-top); } .safe-pb { padding-bottom: var(--safe-bottom); } }
-      button { cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
+      .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+      .custom-scrollbar::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
     </style>
     <script type="importmap">
     {
