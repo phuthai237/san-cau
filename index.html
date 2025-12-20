@@ -4,6 +4,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Badminton Pro" />
@@ -19,9 +22,6 @@
       body { font-family: 'Inter', sans-serif; overscroll-behavior-y: none; -webkit-tap-highlight-color: transparent; background-color: #f9fafb; touch-action: manipulation; }
       @supports (padding: env(safe-area-inset-top)) { .safe-pt { padding-top: var(--safe-top); } .safe-pb { padding-bottom: var(--safe-bottom); } }
       button { cursor: pointer; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
-      .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-      .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-      .custom-scrollbar::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
     </style>
     <script type="importmap">
     {
@@ -38,13 +38,5 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
-    <script>
-      // Gỡ bỏ Service Worker cũ nếu có
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(regs => {
-          for(let reg of regs) reg.unregister();
-        });
-      }
-    </script>
   </body>
 </html>

@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { generateTimeSlots, formatDateKey, formatVND, cn, getStartOfWeek, getStartOfMonth, sendNotification } from './utils';
+import { generateTimeSlots, formatDateKey, formatVND, cn, getStartOfWeek, getStartOfMonth } from './utils';
 import { Booking, Court as CourtType, Product, BankConfig, SUPPORTED_BANKS } from './types';
 import { Court } from './Court';
 import { BookingModal } from './BookingModal';
 import { BookingDetailModal } from './BookingDetailModal';
 import { ProductModal } from './ProductModal';
-import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell, DownloadCloud, UploadCloud, AlertCircle, RefreshCcw, Landmark, Share2, History, CloudCheck, Wifi, WifiOff } from 'lucide-react';
+import { Trash2, Trophy, ChevronLeft, ChevronRight, BarChart3, ShoppingBag, Plus, Calendar as CalendarIcon, Play, X, ShieldCheck, TrendingUp, Wallet, Package, Settings2, ArrowUpRight, Save, User as UserIcon, CheckCircle, BellRing, CloudLightning, RefreshCw, Smartphone, Bell, DownloadCloud, UploadCloud, AlertCircle, RefreshCcw, Landmark, Share2, History, CloudCheck, Wifi, WifiOff, Globe } from 'lucide-react';
 
 const COURTS: CourtType[] = [{ id: 1, name: 'Sân 1 (VIP)' }, { id: 2, name: 'Sân 2 (Thường)' }];
 const DEFAULT_PRODUCTS: Product[] = [
@@ -16,8 +16,8 @@ const DEFAULT_PRODUCTS: Product[] = [
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
 
-// BUCKET DUY NHẤT CHO TOÀN BỘ HỆ THỐNG
-const CLOUD_BUCKET = 'badm_pro_v7_global'; 
+// BUCKET DUY NHẤT - HÃY ĐẢM BẢO KHÔNG THAY ĐỔI TRÊN CÁC MÁY
+const CLOUD_BUCKET = 'badm_pro_v8_final'; 
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -28,7 +28,7 @@ const App: React.FC = () => {
   
   const [syncId, setSyncId] = useState(() => localStorage.getItem('b-sync') || '');
   const [tmpSync, setTmpSync] = useState(syncId);
-  const [syncSt, setSyncSt] = useState<'idle' | 'syncing' | 'success' | 'error'>('idle');
+  const [syncSt, setSyncSt] = useState<'idle' | 'syncing' | 'success' | 'error' | 'warning'>('idle');
   const [syncMsg, setSyncMsg] = useState('');
   const [lastSyncTime, setLastSyncTime] = useState<string>(() => localStorage.getItem('b-last-sync') || 'Chưa kết nối');
   
@@ -47,44 +47,40 @@ const App: React.FC = () => {
   const performSync = useCallback(async (targetId: string, mode: 'push' | 'pull' | 'force-pull') => {
     if (!targetId || lockSync.current) return;
     
-    // Chuẩn hóa mã ID: xóa khoảng trắng, viết thường
     const cleanId = targetId.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     const fullUrl = `https://kvdb.io/${CLOUD_BUCKET}/${cleanId}`;
 
-    if (mode !== 'pull' || syncSt === 'error') {
-      setSyncSt('syncing');
-    }
+    if (mode !== 'pull') setSyncSt('syncing');
 
     try {
-      // Thêm timestamp vào URL để chống cache trên Android
-      const checkRes = await fetch(`${fullUrl}?nocache=${Date.now()}`, { 
+      const response = await fetch(`${fullUrl}?t=${Date.now()}`, { 
+        method: 'GET',
         cache: 'no-store',
-        headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+        headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
       });
       
       let cloudData: any = null;
-      if (checkRes.ok) {
-        const text = await checkRes.text();
-        if (text) cloudData = JSON.parse(text);
-      }
-
-      // 1. TRƯỜNG HỢP CLOUD TRỐNG (MÃ MỚI)
-      if (!cloudData) {
+      if (response.status === 404) {
+        // TRƯỜNG HỢP 1: MÃ CHƯA TỒN TẠI TRÊN CLOUD
         if (mode === 'push' || (mode === 'pull' && stateRef.current.bookings.length > 0)) {
-           setSyncMsg('Đang tạo Cloud...');
-           await doPush(fullUrl);
+          setSyncMsg('Khởi tạo Cloud...');
+          await doPush(fullUrl);
         } else {
-           setSyncMsg('Cloud Trống');
-           setSyncSt('idle');
+          setSyncSt('warning');
+          setSyncMsg('Mã mới (Chưa có dữ liệu)');
         }
         return;
       }
 
-      // 2. LẤY DỮ LIỆU VỀ (PULL / AUTO-SYNC)
+      if (!response.ok) throw new Error("Server error");
+
+      const text = await response.text();
+      if (text) cloudData = JSON.parse(text);
+
+      // TRƯỜNG HỢP 2: LẤY DỮ LIỆU (PULL)
       if (mode === 'pull' || mode === 'force-pull') {
         const cloudTs = Number(cloudData.timestamp || 0);
         
-        // Chỉ cập nhật nếu Cloud mới hơn hoặc bị ép buộc
         if (mode === 'force-pull' || cloudTs > lastTimestamp.current) {
           lockSync.current = true;
           setBookings(cloudData.bookings || []);
@@ -97,7 +93,7 @@ const App: React.FC = () => {
           setSyncMsg('Đã cập nhật');
           setTimeout(() => { lockSync.current = false; }, 1000);
         } else if (lastTimestamp.current > cloudTs && mode === 'pull') {
-          // Nếu máy hiện tại mới hơn Cloud -> Tự động đẩy lên để các máy khác nhận
+          // Máy này mới hơn -> Tự động cập nhật cho các máy khác
           await doPush(fullUrl);
         } else {
           setSyncSt('success');
@@ -105,7 +101,7 @@ const App: React.FC = () => {
         }
       }
 
-      // 3. ĐẨY DỮ LIỆU ĐI (PUSH)
+      // TRƯỜNG HỢP 3: GỬI DỮ LIỆU (PUSH)
       if (mode === 'push') {
         await doPush(fullUrl);
       }
@@ -113,7 +109,7 @@ const App: React.FC = () => {
     } catch (err: any) {
       console.error("Sync Error:", err);
       setSyncSt('error');
-      setSyncMsg('Lỗi mạng');
+      setSyncMsg('Lỗi mạng/Máy chủ bận');
     }
   }, [bank]);
 
@@ -124,7 +120,7 @@ const App: React.FC = () => {
       prods: stateRef.current.products, 
       bank: stateRef.current.bank, 
       timestamp: newTs,
-      device: navigator.userAgent.includes('Android') ? 'Android' : 'PC'
+      updatedAt: new Date().toISOString()
     });
     
     const res = await fetch(url, { 
@@ -144,11 +140,11 @@ const App: React.FC = () => {
     }
   };
 
-  // Vòng lặp kiểm tra Cloud (8 giây một lần là tối ưu cho 3-4 máy)
+  // Vòng lặp tự động (12 giây để tránh bị chặn IP khi dùng nhiều máy)
   useEffect(() => {
     if (!syncId) return;
     performSync(syncId, 'pull');
-    const interval = setInterval(() => performSync(syncId, 'pull'), 8000);
+    const interval = setInterval(() => performSync(syncId, 'pull'), 12000);
     return () => clearInterval(interval);
   }, [syncId, performSync]);
 
@@ -163,15 +159,11 @@ const App: React.FC = () => {
   const stats = useMemo(() => {
     const now = new Date();
     let start: Date;
-    if (period === 'day') {
-      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    } else if (period === 'week') {
-      start = getStartOfWeek(now);
-      start.setHours(0, 0, 0, 0);
-    } else {
-      start = getStartOfMonth(now);
-      start.setHours(0, 0, 0, 0);
-    }
+    if (period === 'day') start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    else if (period === 'week') start = getStartOfWeek(now);
+    else start = getStartOfMonth(now);
+    
+    start.setHours(0, 0, 0, 0);
     const filtered = bookings.filter(b => {
       if (b.status !== 'paid') return false;
       const [y, m, d] = b.date.split('-').map(Number);
@@ -205,7 +197,7 @@ const App: React.FC = () => {
     }));
     setBookings(prev => [...prev, ...newBookings]);
     setModals(m => ({ ...m, booking: false }));
-    if (syncId) setTimeout(() => performSync(syncId, 'push'), 500);
+    if (syncId) setTimeout(() => performSync(syncId, 'push'), 1000);
   }, [selectedDate, pending, syncId, performSync]);
 
   const handleCheckout = (b: Booking, finalValue: number) => {
@@ -224,7 +216,7 @@ const App: React.FC = () => {
       return x;
     }));
     setModals(m => ({ ...m, detail: false }));
-    if (syncId) setTimeout(() => performSync(syncId, 'push'), 500);
+    if (syncId) setTimeout(() => performSync(syncId, 'push'), 1000);
   };
 
   return (
@@ -236,9 +228,12 @@ const App: React.FC = () => {
             <div>
               <h1 className="font-black text-lg uppercase tracking-tighter leading-none">Badminton Pro</h1>
               <div className="flex items-center gap-1.5 mt-1">
-                <span className={cn("w-1.5 h-1.5 rounded-full", syncSt === 'success' ? 'bg-emerald-500' : syncSt === 'syncing' ? 'bg-blue-500 animate-pulse' : 'bg-rose-500')}></span>
-                <p className="text-[8px] font-black uppercase text-slate-500 tracking-widest">
-                    {syncId ? `${syncId.toUpperCase()} • ${syncMsg}` : 'CHƯA CÓ MÃ'}
+                <span className={cn("w-1.5 h-1.5 rounded-full", 
+                    syncSt === 'success' ? 'bg-emerald-500' : 
+                    syncSt === 'syncing' ? 'bg-blue-500 animate-pulse' : 
+                    syncSt === 'warning' ? 'bg-amber-500' : 'bg-rose-500')}></span>
+                <p className="text-[8px] font-black uppercase text-slate-500 tracking-widest truncate max-w-[150px]">
+                    {syncId ? `${syncId}: ${syncMsg}` : 'CHƯA CÓ MÃ'}
                 </p>
               </div>
             </div>
@@ -323,11 +318,11 @@ const App: React.FC = () => {
         {tab === 'settings' && (
           <div className="space-y-6 max-w-2xl mx-auto pb-12 px-1">
             <div className="bg-slate-900 p-6 rounded-[2.5rem] text-white space-y-6 shadow-2xl border-b-8 border-slate-950 overflow-hidden relative">
-               <div className="absolute top-0 right-0 p-8 opacity-10"><Wifi className="w-20 h-20" /></div>
+               <div className="absolute top-0 right-0 p-8 opacity-10"><Globe className="w-20 h-20" /></div>
                <div className="flex items-center justify-between relative z-10">
                   <div className="flex items-center gap-3">
                     <div className="bg-emerald-500/20 p-2 rounded-xl"><CloudCheck className="w-6 h-6 text-emerald-400" /></div>
-                    <h4 className="font-black uppercase text-base tracking-tight">KẾT NỐI ĐA THIẾT BỊ</h4>
+                    <h4 className="font-black uppercase text-base tracking-tight">KẾT NỐI ĐA THIẾT BỊ (3-4 MÁY)</h4>
                   </div>
                   <div className="flex items-center gap-2 text-[8px] font-black uppercase text-emerald-400/60 bg-white/5 px-3 py-1.5 rounded-full">
                       <History className="w-3 h-3" /> {lastSyncTime}
@@ -339,8 +334,8 @@ const App: React.FC = () => {
                     <input 
                       value={tmpSync} 
                       onChange={e => setTmpSync(e.target.value)} 
-                      className="flex-1 bg-white/5 border border-white/10 px-5 py-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all text-sm uppercase" 
-                      placeholder="MÃ KẾT NỐI (VD: 9999)..." 
+                      className="flex-1 bg-white/10 border border-white/20 px-5 py-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all text-sm uppercase placeholder:text-white/20" 
+                      placeholder="MÃ KẾT NỐI (VÍ DỤ: 8888)..." 
                     />
                     <button onClick={() => {
                         const cleanId = tmpSync.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -348,25 +343,36 @@ const App: React.FC = () => {
                         setSyncId(cleanId);
                         localStorage.setItem('b-sync', cleanId);
                         performSync(cleanId, 'force-pull');
-                    }} className="bg-emerald-600 px-6 rounded-2xl active:scale-95 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all flex items-center justify-center"><Save className="w-5 h-5" /></button>
+                    }} className="bg-emerald-600 px-6 rounded-2xl active:scale-95 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all flex items-center justify-center border border-white/10 text-white font-black text-xs uppercase gap-2">
+                       <Save className="w-4 h-4" /> LƯU MÃ
+                    </button>
                   </div>
                   
-                  <div className="bg-white/5 p-4 rounded-2xl border border-white/5">
-                    <p className="text-[10px] font-bold text-white/40 uppercase mb-3 text-center">HƯỚNG DẪN KẾT NỐI 3-4 MÁY:</p>
-                    <ul className="text-[9px] space-y-2 text-white/60 font-medium">
-                      <li className="flex gap-2 items-start"><CheckCircle className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" /> 1. Nhập cùng 1 mã ID trên tất cả các máy.</li>
-                      <li className="flex gap-2 items-start"><CheckCircle className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" /> 2. Nhấn nút <Save className="w-2 h-2 inline" /> để xác nhận mã trên từng máy.</li>
-                      <li className="flex gap-2 items-start"><CheckCircle className="w-3 h-3 text-emerald-500 shrink-0 mt-0.5" /> 3. Nếu máy Android chưa thấy dữ liệu, nhấn nút <DownloadCloud className="w-2 h-2 inline" /> phía dưới.</li>
-                    </ul>
+                  <div className="bg-emerald-600/10 p-5 rounded-2xl border border-emerald-500/20">
+                    <p className="text-[10px] font-black text-emerald-400 uppercase mb-3 text-center tracking-[0.2em]">CÁCH ĐỒNG BỘ 3-4 MÁY CHUẨN:</p>
+                    <div className="grid grid-cols-1 gap-2 text-[9px] text-white/70 font-bold uppercase">
+                      <div className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/5">
+                        <span className="bg-emerald-600 w-5 h-5 flex items-center justify-center rounded-full text-[8px] shrink-0">1</span>
+                        Nhập cùng 1 mã trên tất cả các máy (PC, Android...)
+                      </div>
+                      <div className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/5">
+                        <span className="bg-emerald-600 w-5 h-5 flex items-center justify-center rounded-full text-[8px] shrink-0">2</span>
+                        Trên mỗi máy, NHẤN NÚT "LƯU MÃ" MÀU XANH LÁ
+                      </div>
+                      <div className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/5">
+                        <span className="bg-emerald-600 w-5 h-5 flex items-center justify-center rounded-full text-[8px] shrink-0">3</span>
+                        Nếu máy Android chưa có dữ liệu, nhấn "TẢI TỪ CLOUD VỀ"
+                      </div>
+                    </div>
                   </div>
                </div>
 
                <div className="grid grid-cols-2 gap-4 pt-2 relative z-10">
-                    <button onClick={() => { if(confirm("Bạn muốn đẩy dữ liệu máy này lên Cloud để các máy khác tải về?")) performSync(syncId, 'push'); }} className="group flex flex-col items-center justify-center gap-2 bg-emerald-600/10 border border-emerald-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-emerald-600 hover:text-white transition-all active:scale-95">
-                       <UploadCloud className="w-6 h-6 mb-1" /> Đẩy lên Cloud
+                    <button onClick={() => { if(confirm("Đẩy dữ liệu máy này lên Cloud?")) performSync(syncId, 'push'); }} className="group flex flex-col items-center justify-center gap-2 bg-white/5 border border-white/10 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-emerald-600 hover:text-white transition-all active:scale-95">
+                       <UploadCloud className="w-6 h-6 mb-1 text-emerald-500 group-hover:text-white" /> Đẩy lên Cloud
                     </button>
-                    <button onClick={() => { if(confirm("Bạn muốn xóa dữ liệu máy này và tải dữ liệu từ Cloud về?")) performSync(syncId, 'force-pull'); }} className="group flex flex-col items-center justify-center gap-2 bg-blue-600/10 border border-blue-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-blue-600 hover:text-white transition-all active:scale-95">
-                       <DownloadCloud className="w-6 h-6 mb-1" /> Tải từ Cloud về
+                    <button onClick={() => { if(confirm("Xóa dữ liệu máy này và tải từ Cloud về?")) performSync(syncId, 'force-pull'); }} className="group flex flex-col items-center justify-center gap-2 bg-white/5 border border-white/10 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-blue-600 hover:text-white transition-all active:scale-95">
+                       <DownloadCloud className="w-6 h-6 mb-1 text-blue-500 group-hover:text-white" /> Tải từ Cloud về
                     </button>
                </div>
             </div>
@@ -385,38 +391,6 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
-
-      {modals.quick && (
-        <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white rounded-[3rem] w-full max-w-sm overflow-hidden shadow-2xl border-4 border-white animate-in zoom-in-95">
-            <div className="bg-emerald-900 p-6 text-white flex justify-between items-center">
-              <h3 className="font-black text-sm uppercase tracking-widest">Vào chơi nhanh</h3>
-              <button onClick={() => setModals(m => ({...m, quick: false}))} className="p-2 bg-white/10 rounded-xl active:scale-90"><X className="w-5 h-5"/></button>
-            </div>
-            <div className="p-5 space-y-3 bg-slate-50">
-              {COURTS.map(c => (
-                <button key={c.id} onClick={() => {
-                  const now = new Date(); 
-                  const h = now.getHours().toString().padStart(2, '0');
-                  const m = now.getMinutes() < 30 ? '00' : '30';
-                  const b: Booking = { 
-                    id: Math.random().toString(36).slice(2, 8), courtId: c.id, date: formatDateKey(selectedDate), timeSlot: `${h}:${m}`, actualStartTime: now.toISOString(), isLive: true, customerName: `KHÁCH SÂN ${c.id}`, phoneNumber: "TRỰC TIẾP", totalAmount: 0, deposit: 0, remainingAmount: 0, serviceItems: [], status: 'active', durationSlots: 1 
-                  };
-                  setBookings(prev => [...prev, b]); 
-                  setModals({ ...modals, quick: false });
-                  if(syncId) setTimeout(() => performSync(syncId, 'push'), 500);
-                }} className="w-full p-6 bg-white border-2 border-slate-100 rounded-[2rem] font-black uppercase text-xs flex justify-between items-center hover:border-emerald-500 active:scale-95 shadow-sm group">
-                  <div className="flex items-center gap-4">
-                    <div className="bg-emerald-100 p-3 rounded-2xl text-emerald-700 group-hover:bg-emerald-600 group-hover:text-white transition-all"><Trophy className="w-5 h-5" /></div>
-                    {c.name}
-                  </div>
-                  <ArrowUpRight className="w-4 h-4 opacity-30" />
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t p-3 flex justify-around items-center safe-pb rounded-t-[2.5rem] shadow-[0_-15px_40px_rgba(0,0,0,0.08)] z-50">
         {[
