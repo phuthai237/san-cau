@@ -36,7 +36,10 @@ const App: React.FC = () => {
   const [selB, setSelB] = useState<Booking | null>(null);
   const [period, setPeriod] = useState<'day'|'week'|'month'>('day');
 
-  const isInitialMount = useRef(true);
+  // Dùng Ref để tránh vòng lặp dependencies trong performSync
+  const stateRef = useRef({ bookings, products, bank });
+  useEffect(() => { stateRef.current = { bookings, products, bank }; }, [bookings, products, bank]);
+
   const lockSync = useRef(false);
   const lastTimestamp = useRef(Number(localStorage.getItem('b-ts') || '0'));
 
@@ -49,7 +52,7 @@ const App: React.FC = () => {
 
     if (mode !== 'auto') {
         setSyncSt('syncing');
-        setSyncMsg(mode === 'push' ? 'Đang tải lên...' : 'Đang tải về...');
+        setSyncMsg(mode === 'push' ? 'Đang gửi...' : 'Đang lấy...');
     }
 
     try {
@@ -57,6 +60,7 @@ const App: React.FC = () => {
       let cloudData: any = null;
       if (checkRes.ok) cloudData = await checkRes.json();
 
+      // PULL: Chỉ lấy về nếu dữ liệu trên cloud mới hơn dữ liệu cục bộ
       if (cloudData && cloudData.timestamp > lastTimestamp.current) {
         if (mode === 'auto' || mode === 'pull') {
             lockSync.current = true;
@@ -66,31 +70,33 @@ const App: React.FC = () => {
             lastTimestamp.current = cloudData.timestamp;
             localStorage.setItem('b-ts', cloudData.timestamp.toString());
             setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
-            if (mode === 'pull') alert('✅ Đã cập nhật bản mới nhất từ Cloud!');
+            setSyncSt('success');
+            setSyncMsg('Vừa cập nhật');
             setTimeout(() => { lockSync.current = false; }, 1000);
             return;
         }
       }
 
+      // PUSH: Đẩy dữ liệu lên nếu có thay đổi cục bộ
       if (mode === 'push' || (mode === 'auto' && !cloudData)) {
         const newTs = Date.now();
         const payload = JSON.stringify({ 
-          bookings, prods: products, bank, 
-          timestamp: newTs, updatedAt: new Date().toISOString() 
+          bookings: stateRef.current.bookings, 
+          prods: stateRef.current.products, 
+          bank: stateRef.current.bank, 
+          timestamp: newTs, 
+          updatedAt: new Date().toISOString() 
         });
         
-        const res = await fetch(fullUrl, {
+        await fetch(fullUrl, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: payload
         });
 
-        if (res.ok) {
-            lastTimestamp.current = newTs;
-            localStorage.setItem('b-ts', newTs.toString());
-            setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
-            if (mode === 'push') alert('✅ Đã lưu bản sao lưu lên Cloud!');
-        }
+        lastTimestamp.current = newTs;
+        localStorage.setItem('b-ts', newTs.toString());
+        setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
       }
 
       setSyncSt('success');
@@ -99,22 +105,19 @@ const App: React.FC = () => {
       setSyncSt('error');
       setSyncMsg('Lỗi kết nối');
     }
-  }, [bookings, products, bank]);
+  }, []); // Hàm này giờ đây ổn định, không bị tạo lại khi data thay đổi
 
-  useEffect(() => {
-    if (isInitialMount.current) {
-        isInitialMount.current = false;
-        return;
-    }
-    if (syncId) {
-        const timeout = setTimeout(() => performSync(syncId, 'push'), 2000);
-        return () => clearTimeout(timeout);
-    }
-  }, [bookings, products, bank, syncId, performSync]);
-
+  // Tự động đẩy dữ liệu khi có thay đổi
   useEffect(() => {
     if (!syncId) return;
-    const interval = setInterval(() => performSync(syncId, 'pull'), 30000);
+    const timeout = setTimeout(() => performSync(syncId, 'push'), 3000);
+    return () => clearTimeout(timeout);
+  }, [bookings, products, bank, syncId, performSync]);
+
+  // Tự động kéo dữ liệu về mỗi 10 giây (Rút ngắn thời gian để nhạy hơn)
+  useEffect(() => {
+    if (!syncId) return;
+    const interval = setInterval(() => performSync(syncId, 'pull'), 10000);
     return () => clearInterval(interval);
   }, [syncId, performSync]);
 
@@ -134,6 +137,36 @@ const App: React.FC = () => {
   };
 
   const dKey = useMemo(() => formatDateKey(selectedDate), [selectedDate]);
+
+  // FIX: Added missing stats calculation using useMemo to resolve "Cannot find name 'stats'" errors
+  const stats = useMemo(() => {
+    const now = new Date();
+    let start: Date;
+    if (period === 'day') {
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    } else if (period === 'week') {
+      start = getStartOfWeek(now);
+      start.setHours(0, 0, 0, 0);
+    } else {
+      start = getStartOfMonth(now);
+      start.setHours(0, 0, 0, 0);
+    }
+
+    const filtered = bookings.filter(b => {
+      if (b.status !== 'paid') return false;
+      const [y, m, d] = b.date.split('-').map(Number);
+      const bDate = new Date(y, m - 1, d);
+      return bDate >= start;
+    });
+
+    const rev = filtered.reduce((acc, b) => acc + (b.totalAmount || 0), 0);
+    const serviceCost = filtered.reduce((acc, b) => {
+      const itemsCost = (b.serviceItems || []).reduce((sAcc, s) => sAcc + ((s.costPrice || 0) * (s.quantity || 0)), 0);
+      return acc + itemsCost;
+    }, 0);
+
+    return { rev, prof: rev - serviceCost };
+  }, [bookings, period]);
 
   const onConfirm = useCallback((data: any) => {
     const groupId = data.selectedCourtIds.length > 1 ? Math.random().toString(36).slice(2, 8) : undefined;
@@ -156,16 +189,16 @@ const App: React.FC = () => {
     setModals(m => ({ ...m, booking: false }));
   }, [dKey, pending]);
 
-  const handleCheckout = (b: Booking, finalVal: number) => {
+  const handleCheckout = (b: Booking, finalValue: number) => {
     setBookings(prev => prev.map(x => {
       if (x.id === b.id || (b.groupId && x.groupId === b.groupId)) {
         const sTot = (x.serviceItems || []).reduce((a, s) => a + (s.price * s.quantity), 0);
-        // Nếu là Live (chơi ngay), finalVal là số phút. Ngược lại là số slots (30p)
-        const cTot = x.isLive ? finalVal * 1000 : finalVal * 30000;
+        // Nếu là Live (chơi ngay), finalValue là số phút. Ngược lại là số slots (30p)
+        const cTot = x.isLive ? finalValue * 1000 : finalValue * 30000;
         return { 
           ...x, 
           status: 'paid' as const, 
-          durationSlots: x.isLive ? Math.ceil(finalVal / 30) : finalVal,
+          durationSlots: x.isLive ? Math.ceil(finalValue / 30) : finalValue,
           totalAmount: cTot + sTot,
           remainingAmount: 0
         };
@@ -174,15 +207,6 @@ const App: React.FC = () => {
     }));
     setModals(m => ({ ...m, detail: false }));
   };
-
-  const stats = useMemo(() => {
-    const now = new Date();
-    const start = period === 'day' ? dKey : (period === 'week' ? formatDateKey(getStartOfWeek(now)) : formatDateKey(getStartOfMonth(now)));
-    const filtered = bookings.filter(b => b.status === 'paid' && b.date >= start);
-    const rev = filtered.reduce((a, b) => a + b.totalAmount, 0);
-    const cost = filtered.reduce((a, b) => a + (b.serviceItems?.reduce((x, y) => x + (y.costPrice * y.quantity), 0) || 0), 0);
-    return { rev, cost, prof: rev - cost, count: filtered.length };
-  }, [bookings, period, dKey]);
 
   return (
     <div className="min-h-screen pb-28 bg-slate-50 font-inter text-slate-900">
@@ -276,7 +300,7 @@ const App: React.FC = () => {
                <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="bg-emerald-500/20 p-2 rounded-xl"><CloudCheck className="w-6 h-6 text-emerald-400" /></div>
-                    <h4 className="font-black uppercase text-base tracking-tight">Sync 2 Chiều (v3)</h4>
+                    <h4 className="font-black uppercase text-base tracking-tight">Sync 2 Máy (v3.1)</h4>
                   </div>
                   <div className="flex items-center gap-2 text-[8px] font-black uppercase text-emerald-400/60 bg-white/5 px-3 py-1.5 rounded-full">
                       <History className="w-3 h-3" /> {lastSyncTime}
@@ -289,19 +313,19 @@ const App: React.FC = () => {
                       value={tmpSync} 
                       onChange={e => setTmpSync(e.target.value)} 
                       className="flex-1 bg-white/5 border border-white/10 px-5 py-5 rounded-2xl font-black text-white outline-none focus:border-emerald-500 transition-all text-sm" 
-                      placeholder="MÃ ĐỒNG BỘ..." 
+                      placeholder="NHẬP MÃ DÙNG CHUNG..." 
                     />
                     <button onClick={handleSaveSync} className="bg-emerald-600 px-6 rounded-2xl active:scale-95 shadow-lg shadow-emerald-900/20 hover:bg-emerald-500 transition-all"><Save className="w-5 h-5" /></button>
                   </div>
-                  <p className="text-[8px] font-bold text-white/30 uppercase tracking-[0.2em] text-center">Tất cả các máy dùng chung mã này sẽ tự cập nhật khi có thay đổi</p>
+                  <p className="text-[8px] font-bold text-white/30 uppercase tracking-[0.2em] text-center italic">Dùng chung 1 mã trên 2 thiết bị để đồng bộ dữ liệu</p>
                </div>
 
                <div className="grid grid-cols-2 gap-4 pt-2">
                     <button onClick={() => performSync(syncId, 'push')} className="group flex flex-col items-center justify-center gap-2 bg-emerald-600/10 border border-emerald-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-emerald-600 hover:text-white transition-all active:scale-95">
-                       <UploadCloud className="w-6 h-6 mb-1 group-hover:animate-bounce" /> Gửi dữ liệu đi
+                       <UploadCloud className="w-6 h-6 mb-1" /> Gửi dữ liệu đi
                     </button>
                     <button onClick={() => performSync(syncId, 'pull')} className="group flex flex-col items-center justify-center gap-2 bg-blue-600/10 border border-blue-500/30 py-6 rounded-[2rem] font-black text-[9px] uppercase hover:bg-blue-600 hover:text-white transition-all active:scale-95">
-                       <DownloadCloud className="w-6 h-6 mb-1 group-hover:animate-bounce" /> Lấy dữ liệu về
+                       <DownloadCloud className="w-6 h-6 mb-1" /> Buộc cập nhật
                     </button>
                </div>
             </div>
@@ -323,7 +347,7 @@ const App: React.FC = () => {
 
       {modals.quick && (
         <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-6 backdrop-blur-md animate-in fade-in duration-300">
-          <div className="bg-white rounded-[3rem] w-full max-w-sm overflow-hidden shadow-2xl border-4 border-white animate-in zoom-in-95">
+          <div className="bg-white rounded-[3rem] w-full max-sm:rounded-t-[3rem] max-w-sm overflow-hidden shadow-2xl border-4 border-white animate-in zoom-in-95">
             <div className="bg-emerald-900 p-6 text-white flex justify-between items-center">
               <h3 className="font-black text-sm uppercase tracking-widest">Vào chơi nhanh</h3>
               <button onClick={() => setModals(m => ({...m, quick: false}))} className="p-2 bg-white/10 rounded-xl active:scale-90"><X className="w-5 h-5"/></button>
