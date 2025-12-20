@@ -16,8 +16,8 @@ const DEFAULT_PRODUCTS: Product[] = [
 ];
 const TIME_SLOTS = generateTimeSlots(6, 22);
 
-// BUCKET V14 - PHIÊN BẢN CỨU CÁNH CUỐI CÙNG
-const CLOUD_BUCKET = 'badm_pro_v14_final'; 
+// BUCKET V15 - PHIÊN BẢN TỰ ĐỘNG KHỞI TẠO (FIX LỖI 404)
+const CLOUD_BUCKET = 'badm_v15_resilient'; 
 
 const App: React.FC = () => {
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -52,28 +52,28 @@ const App: React.FC = () => {
   useEffect(() => { stateRef.current = { bookings, products, bank }; }, [bookings, products, bank]);
 
   /**
-   * Fetch v14 - Siêu tối giản để vượt qua Adblock/Firewall
+   * Fetch v15 - Tối ưu hóa để vượt qua lỗi 404 và CORS
    */
   const ultraFetch = async (url: string, method: string, data?: any) => {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
-    const headers: Record<string, string> = {};
-    if (method === 'PUT') {
-        // Sử dụng text/plain để tránh kích hoạt CORS Preflight (OPTIONS request) 
-        // vốn hay bị các WiFi sân cầu lông chặn đứng.
-        headers['Content-Type'] = 'text/plain';
+    const options: RequestInit = {
+      method,
+      mode: 'cors',
+      credentials: 'omit',
+      signal: controller.signal,
+      cache: 'no-cache'
+    };
+
+    if (data) {
+      options.body = JSON.stringify(data);
+      // Sử dụng text/plain để bỏ qua kiểm tra CORS OPTIONS của một số WiFi sân cầu lông
+      options.headers = { 'Content-Type': 'text/plain' };
     }
 
     try {
-      const response = await fetch(url, {
-        method,
-        headers,
-        body: data ? JSON.stringify(data) : undefined,
-        mode: 'cors',
-        credentials: 'omit',
-        signal: controller.signal
-      });
+      const response = await fetch(url, options);
       clearTimeout(timeout);
       return response;
     } catch (e: any) {
@@ -88,38 +88,42 @@ const App: React.FC = () => {
     const cleanId = targetId.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
     if (cleanId.length < 3) return;
 
-    // Thay đổi URL chút ít để tránh cache ISP
-    const fullUrl = `https://kvdb.io/${CLOUD_BUCKET}/${cleanId}?nocache=${Date.now()}`;
+    // URL cho việc lấy dữ liệu (GET) - thêm nocache để đảm bảo dữ liệu mới nhất
+    const getUrl = `https://kvdb.io/${CLOUD_BUCKET}/${cleanId}?t=${Date.now()}`;
+    // URL cho việc lưu dữ liệu (PUT) - KHÔNG thêm query string để tránh lỗi server
+    const putUrl = `https://kvdb.io/${CLOUD_BUCKET}/${cleanId}`;
+
     if (mode !== 'pull') setSyncSt('syncing');
 
     try {
-      const response = await ultraFetch(fullUrl, 'GET');
+      const response = await ultraFetch(getUrl, 'GET');
       
-      if (response.status === 429) {
-        setSyncSt('warning');
-        setSyncMsg('Server đang nghẽn');
-        return;
-      }
-
+      // XỬ LÝ LỖI 404 (Dữ liệu chưa có trên Cloud)
       if (response.status === 404) {
-        // Case: Mã mới hoặc bị xóa trên server
         if (mode === 'push' || (mode === 'pull' && stateRef.current.bookings.length > 0)) {
-          await doPush(fullUrl.split('?')[0]);
+          setSyncMsg('Đang tạo mã mới...');
+          await doPush(putUrl);
         } else {
           setSyncSt('warning');
-          setSyncMsg('Sẵn sàng kết nối');
+          setSyncMsg('Chờ dữ liệu máy này...');
         }
         return;
       }
 
-      if (!response.ok) throw new Error(`Lỗi HTTP ${response.status}`);
+      if (response.status === 429) {
+        setSyncSt('warning');
+        setSyncMsg('Server bận (Thử lại sau)');
+        return;
+      }
+
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
       const cloudData = await response.json();
       if (!cloudData) return;
 
       const cloudTs = Number(cloudData.timestamp || 0);
 
-      // Nếu dữ liệu Cloud mới hơn hoặc yêu cầu Pull cưỡng bức
+      // Đồng bộ dữ liệu
       if (mode === 'force-pull' || cloudTs > lastTimestamp.current) {
         lockSync.current = true;
         setBookings(cloudData.bookings || []);
@@ -129,22 +133,21 @@ const App: React.FC = () => {
         localStorage.setItem('b-ts', cloudTs.toString());
         setLastSyncTime(new Date().toLocaleTimeString('vi-VN'));
         setSyncSt('success');
-        setSyncMsg('Đã tải Cloud');
+        setSyncMsg('Đã tải từ Cloud');
         setTimeout(() => { lockSync.current = false; }, 1000);
       } else if (lastTimestamp.current > cloudTs && mode === 'pull') {
-        // Máy này mới hơn -> Push lên Cloud
-        await doPush(fullUrl.split('?')[0]);
+        // Máy này có dữ liệu mới hơn -> tự động cập nhật lên Cloud
+        await doPush(putUrl);
       } else {
         setSyncSt('success');
-        setSyncMsg('Đã đồng bộ');
+        setSyncMsg('Dữ liệu đã khớp');
       }
 
-      if (mode === 'push') await doPush(fullUrl.split('?')[0]);
+      if (mode === 'push') await doPush(putUrl);
       
     } catch (err: any) {
       console.error("Sync Error:", err);
-      const msg = err.message || "Lỗi mạng";
-      errorHistory.current = [msg, ...errorHistory.current].slice(0, 5);
+      errorHistory.current = [err.message || "Lỗi mạng", ...errorHistory.current].slice(0, 3);
       
       if (!navigator.onLine) {
         setSyncSt('offline');
@@ -163,7 +166,7 @@ const App: React.FC = () => {
       prods: stateRef.current.products, 
       bank: stateRef.current.bank, 
       timestamp: newTs,
-      ver: '14.0'
+      ver: '15.0'
     };
     
     const res = await ultraFetch(url, 'PUT', payload);
@@ -175,7 +178,7 @@ const App: React.FC = () => {
       setSyncSt('success');
       setSyncMsg('Đã lưu Cloud');
     } else {
-      throw new Error(`Push failed: ${res.status}`);
+      throw new Error(`Ghi dữ liệu thất bại: ${res.status}`);
     }
   };
 
@@ -184,7 +187,7 @@ const App: React.FC = () => {
     let timer: any;
     const loop = async () => {
       await performSync(syncId, 'pull');
-      timer = setTimeout(loop, 25000); // 25 giây đồng bộ 1 lần để tránh nghẽn
+      timer = setTimeout(loop, 30000); // 30s đồng bộ 1 lần để bền bỉ hơn
     };
     timer = setTimeout(loop, 2000);
     return () => clearTimeout(timer);
@@ -307,7 +310,7 @@ const App: React.FC = () => {
                <div className="flex items-center justify-between relative z-10 mb-8">
                   <div className="flex items-center gap-4">
                     <div className="bg-emerald-500/20 p-3 rounded-2xl border border-emerald-500/20"><Radio className="w-7 h-7 text-emerald-400 animate-pulse" /></div>
-                    <h4 className="font-black uppercase text-lg tracking-tighter">Đồng bộ Cloud v14</h4>
+                    <h4 className="font-black uppercase text-lg tracking-tighter">Đồng bộ Cloud v15</h4>
                   </div>
                   <div className="text-[10px] font-black uppercase text-emerald-400/70">
                       Cập nhật: {lastSyncTime}
@@ -339,7 +342,7 @@ const App: React.FC = () => {
                   {errorHistory.current.length > 0 && (
                       <div className="bg-rose-500/10 p-4 rounded-2xl border border-rose-500/20">
                           <p className="text-[9px] font-black text-rose-400 uppercase tracking-widest mb-2 flex items-center gap-2">
-                             <Terminal className="w-3 h-3" /> Nhật ký lỗi gần nhất:
+                             <Terminal className="w-3 h-3" /> Chẩn đoán lỗi:
                           </p>
                           {errorHistory.current.map((err, i) => (
                               <p key={i} className="text-[10px] text-rose-300/70 font-mono truncate">{`> ${err}`}</p>
@@ -350,20 +353,20 @@ const App: React.FC = () => {
                   <div className="bg-blue-500/10 p-6 rounded-[2rem] border border-blue-500/20">
                     <div className="flex items-center gap-3 mb-4">
                         <ShieldAlert className="w-5 h-5 text-blue-400" />
-                        <p className="text-[11px] font-black text-blue-400 uppercase tracking-widest">Cách cứu vãn đồng bộ:</p>
+                        <p className="text-[11px] font-black text-blue-400 uppercase tracking-widest">Nếu vẫn báo "Lỗi kết nối":</p>
                     </div>
                     <div className="grid grid-cols-1 gap-3 text-[10px] text-white/80 font-bold uppercase leading-relaxed">
-                      <p className="flex items-start gap-3"><span className="bg-blue-600 w-5 h-5 flex items-center justify-center rounded-lg text-[9px] shrink-0 mt-0.5">1</span> <b>Đổi WiFi sang 4G:</b> Đa số lỗi "Kết nối" là do WiFi sân bị chặn API. Hãy bật <b>4G</b> trong 10 giây để app gửi dữ liệu.</p>
-                      <p className="flex items-start gap-3"><span className="bg-blue-600 w-5 h-5 flex items-center justify-center rounded-lg text-[9px] shrink-0 mt-0.5">2</span> <b>Kiểm tra mã:</b> Đảm bảo các máy đều dùng <b>CHUNG 1 MÃ</b> và không có dấu cách.</p>
+                      <p className="flex items-start gap-3"><span className="bg-blue-600 w-5 h-5 flex items-center justify-center rounded-lg text-[9px] shrink-0 mt-0.5">1</span> <b>Đổi sang 4G:</b> Đa số các sân WiFi chặn cổng Cloud. Bạn chỉ cần bật <b>4G</b> trong 5 giây để app đồng bộ lần đầu.</p>
+                      <p className="flex items-start gap-3"><span className="bg-blue-600 w-5 h-5 flex items-center justify-center rounded-lg text-[9px] shrink-0 mt-0.5">2</span> <b>Nhấn "Đẩy lên Cloud":</b> Nếu là máy chủ có dữ liệu đúng, hãy ép app lưu lên mạng bằng nút dưới đây.</p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <button onClick={() => { if(confirm("Lưu dữ liệu máy này lên Cloud?")) performSync(syncId, 'push'); }} className="flex flex-col items-center justify-center gap-3 bg-white/5 border-2 border-white/5 py-8 rounded-[2.5rem] font-black text-[10px] uppercase hover:bg-emerald-600 transition-all active:scale-95 shadow-sm text-white/70 hover:text-white">
-                       <UploadCloud className="w-8 h-8 mb-1 text-emerald-500" /> Gửi lên Cloud
+                       <UploadCloud className="w-8 h-8 mb-1 text-emerald-500" /> Đẩy lên Cloud
                     </button>
                     <button onClick={() => { if(confirm("Xóa máy này, tải từ Cloud về?")) performSync(syncId, 'force-pull'); }} className="flex flex-col items-center justify-center gap-3 bg-white/5 border-2 border-white/5 py-8 rounded-[2.5rem] font-black text-[10px] uppercase hover:bg-blue-600 transition-all active:scale-95 shadow-sm text-white/70 hover:text-white">
-                       <DownloadCloud className="w-8 h-8 mb-1 text-blue-500" /> Lấy từ Cloud về
+                       <DownloadCloud className="w-8 h-8 mb-1 text-blue-500" /> Tải từ Cloud về
                     </button>
                   </div>
                </div>
